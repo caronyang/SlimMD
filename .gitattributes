@@ -1,0 +1,20 @@
+# Normalize line endings: LF in the repository, native on checkout.
+* text=auto
+
+*.cs    text eol=crlf
+*.csproj text eol=crlf
+*.sln   text eol=crlf
+*.ps1   text eol=crlf
+*.iss   text eol=crlf
+*.js    text eol=lf
+*.json  text eol=lf
+*.css   text eol=lf
+*.html  text eol=lf
+*.md    text eol=lf
+*.yml   text eol=lf
+
+# never touched by diff/merge
+*.png   binary
+*.ico   binary
+*.exe   binary
+*.pdf   binary
