@@ -2,8 +2,10 @@
 
 [English](README.md) | [繁體中文](README.zh-Hant.md)
 
-A lightweight Markdown editor and viewer for Windows — built with .NET 9 WinForms
-and WebView2, so it stays fast and light on CPU and memory (no Electron).
+**SlimMD is a free, open-source Markdown editor and viewer for Windows** — a
+lightweight alternative to Electron-based Markdown apps. Built with .NET 9
+WinForms and WebView2, it stays fast and light on CPU and memory, starts
+instantly, and handles `.md` files with proper encoding (UTF-8 / Big5 / GBK).
 
 ![SlimMD browse view](art/readme_browse_en.png)
 

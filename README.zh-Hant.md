@@ -2,8 +2,9 @@
 
 [English](README.md) | [繁體中文](README.zh-Hant.md)
 
-適用於 Windows 的輕量級 Markdown 編輯器與檢視器 — 使用 .NET 9 WinForms 與
-WebView2 打造，CPU 與記憶體佔用低、啟動快速（非 Electron）。
+**SlimMD 是一套免費、開源的 Windows Markdown 編輯器與檢視器**，是 Electron
+類 Markdown 工具的輕量替代方案。以 .NET 9 WinForms 與 WebView2 打造，CPU 與
+記憶體佔用低、啟動快速，並正確處理 `.md` 檔編碼（UTF-8 / Big5 / GBK）。
 
 ![SlimMD 瀏覽模式](art/readme_browse_en.png)
 
