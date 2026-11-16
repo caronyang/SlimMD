@@ -25,7 +25,6 @@ internal sealed class MsgDialog : Form
             RowCount = 2,
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            Dock = DockStyle.Top,
         };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 400));
@@ -49,8 +48,7 @@ internal sealed class MsgDialog : Form
         var label = new Label
         {
             Text = message,
-            AutoSize = false,
-            Width = 400,
+            AutoSize = true,
             MaximumSize = new Size(400, 0),
             Margin = new Padding(0, 2, 0, 8),
         };
@@ -62,7 +60,6 @@ internal sealed class MsgDialog : Form
         {
             FlowDirection = FlowDirection.RightToLeft,
             AutoSize = true,
-            Dock = DockStyle.Bottom,
             Margin = new Padding(0, 12, 0, 0),
         };
 
@@ -91,7 +88,14 @@ internal sealed class MsgDialog : Form
         layout.Controls.Add(buttonPanel, 0, 1);
         layout.SetColumnSpan(buttonPanel, 2);
 
+        // No docking: docked children inside a non-autosizing form overflowed
+        // and painted over each other. Size the form to the layout explicitly.
         Controls.Add(layout);
+        layout.Location = new Point(Padding.Left, Padding.Top);
+        layout.PerformLayout();
+        ClientSize = new Size(
+            layout.Width + Padding.Horizontal,
+            layout.Height + Padding.Vertical);
 
         if (accept != null) AcceptButton = accept;
         if (cancel != null) CancelButton = cancel;

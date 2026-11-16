@@ -425,7 +425,7 @@ var SLIMMD = (function () {
       if (isBlank(content)) {
         rendered = '';
       } else {
-        rendered = renderBlocks(content.split('\n'), ctx, !loose);
+        rendered = renderBlocks(content.split('\n'), childCtx(ctx), !loose);
       }
 
       if (tm && isTask) {
@@ -437,11 +437,26 @@ var SLIMMD = (function () {
     });
 
     html += '</' + tag + '>';
-    out.push(html);
+    out.push(lineMark(ctx, start, html));
     return i;
   }
 
   // ------------------------------------------------------------ blocks
+
+  /**
+   * Root-level blocks are prefixed with an `<!--l:N-->` marker carrying their
+   * source line; markLines() later turns these into data-line attributes so
+   * the host can map editor lines to preview blocks for scroll sync.
+   */
+  function lineMark(ctx, line, html) {
+    if (!ctx.root) return html;
+    return '<!--l:' + (line + (ctx.offset || 0)) + '-->' + html;
+  }
+
+  /** Context for nested renderBlocks calls: keep refs, drop root marking. */
+  function childCtx(ctx) {
+    return { refs: ctx.refs };
+  }
 
   function joinParagraph(buf) {
     return buf.map(function (line, idx) {
@@ -463,6 +478,8 @@ var SLIMMD = (function () {
 
       if (isBlank(line)) { i++; continue; }
 
+      var start = i;   // source line where this block begins (line marking)
+
       // fenced code block
       var m = /^ {0,3}(`{3,}|~{3,})[ \t]*([^\s`]*)[ \t]*$/.exec(line);
       if (m) {
@@ -474,7 +491,7 @@ var SLIMMD = (function () {
         while (i < n && !closeRe.test(lines[i])) { buf.push(lines[i]); i++; }
         if (i < n) i++;
         var cls = lang ? ' class="language-' + escapeAttr(lang.replace(/[^\w+#\-.]/g, '')) + '"' : '';
-        out.push('<pre><code' + cls + '>' + escapeHtml(buf.join('\n')) + (buf.length ? '\n' : '') + '</code></pre>');
+        out.push(lineMark(ctx, start, '<pre><code' + cls + '>' + escapeHtml(buf.join('\n')) + (buf.length ? '\n' : '') + '</code></pre>'));
         continue;
       }
 
@@ -483,15 +500,15 @@ var SLIMMD = (function () {
       if (m) {
         var level = m[1].length;
         var htext = m[2].replace(/[ \t]+#+[ \t]*$/, '');
-        out.push('<h' + level + ' id="' + escapeAttr(slug(htext)) + '">' +
-          parseInline(htext, tokens, ctx.refs) + '</h' + level + '>');
+        out.push(lineMark(ctx, start, '<h' + level + ' id="' + escapeAttr(slug(htext)) + '">' +
+          parseInline(htext, tokens, ctx.refs) + '</h' + level + '>'));
         i++;
         continue;
       }
 
       // thematic break
       if (/^ {0,3}([-*_])([ \t]*\1){2,}[ \t]*$/.test(line)) {
-        out.push('<hr>');
+        out.push(lineMark(ctx, start, '<hr>'));
         i++;
         continue;
       }
@@ -512,7 +529,7 @@ var SLIMMD = (function () {
           }
           break;
         }
-        out.push('<blockquote>' + renderBlocks(qbuf, ctx, false) + '</blockquote>');
+        out.push(lineMark(ctx, start, '<blockquote>' + renderBlocks(qbuf, childCtx(ctx), false) + '</blockquote>'));
         continue;
       }
 
@@ -531,7 +548,7 @@ var SLIMMD = (function () {
           body.push(lines[i]);
           i++;
         }
-        out.push(renderTable(line, delimLine, body, ctx));
+        out.push(lineMark(ctx, start, renderTable(line, delimLine, body, ctx)));
         continue;
       }
 
@@ -550,7 +567,7 @@ var SLIMMD = (function () {
           cbuf.push(lines[i].replace(/^(?: {4}|\t)/, ''));
           i++;
         }
-        out.push('<pre><code>' + escapeHtml(cbuf.join('\n')) + '\n</code></pre>');
+        out.push(lineMark(ctx, start, '<pre><code>' + escapeHtml(cbuf.join('\n')) + '\n</code></pre>'));
         continue;
       }
 
@@ -558,7 +575,7 @@ var SLIMMD = (function () {
       if (isHtmlBlockStart(line)) {
         var hbuf = [];
         while (i < n && !isBlank(lines[i])) { hbuf.push(lines[i]); i++; }
-        out.push(sanitizeHtmlBlock(hbuf.join('\n')));
+        out.push(lineMark(ctx, start, sanitizeHtmlBlock(hbuf.join('\n'))));
         continue;
       }
 
@@ -577,19 +594,19 @@ var SLIMMD = (function () {
 
       if (i < n && isSetextUnderline(lines[i]) && /^[ \t]*=/.test(lines[i])) {
         var h1 = joinParagraph(pbuf);
-        out.push('<h1 id="' + escapeAttr(slug(h1)) + '">' + parseInline(h1, tokens, ctx.refs) + '</h1>');
+        out.push(lineMark(ctx, start, '<h1 id="' + escapeAttr(slug(h1)) + '">' + parseInline(h1, tokens, ctx.refs) + '</h1>'));
         i++;
         continue;
       }
       if (i < n && isSetextUnderline(lines[i]) && /^[ \t]*-/.test(lines[i])) {
         var h2 = joinParagraph(pbuf);
-        out.push('<h2 id="' + escapeAttr(slug(h2)) + '">' + parseInline(h2, tokens, ctx.refs) + '</h2>');
+        out.push(lineMark(ctx, start, '<h2 id="' + escapeAttr(slug(h2)) + '">' + parseInline(h2, tokens, ctx.refs) + '</h2>'));
         i++;
         continue;
       }
 
       var para = parseInline(joinParagraph(pbuf), tokens, ctx.refs);
-      out.push(tight ? para : '<p>' + para + '</p>');
+      out.push(lineMark(ctx, start, tight ? para : '<p>' + para + '</p>'));
     }
 
     return out.join('\n');
@@ -615,10 +632,12 @@ var SLIMMD = (function () {
 
     // YAML / TOML front matter at the very top
     var front = '';
+    var offset = 0;
     if (lines.length > 1 && /^(---|\+\+\+)[ \t]*$/.test(lines[0])) {
       for (var f = 1; f < Math.min(lines.length, 500); f++) {
         if (/^(---|\+\+\+|\.\.\.)[ \t]*$/.test(lines[f])) {
           front = '<pre class="frontmatter">' + escapeHtml(lines.slice(1, f).join('\n')) + '</pre>';
+          offset = f + 1;
           lines = lines.slice(f + 1);
           break;
         }
@@ -645,13 +664,14 @@ var SLIMMD = (function () {
         var def = /^ {0,3}\[([^\]]+)\]:[ \t]*(\S+)(?:[ \t]+["'(](.*)["')])?[ \t]*$/.exec(l);
         if (def) {
           refs[def[1].trim().toLowerCase()] = { url: def[2], title: def[3] || '' };
+          body.push('');   // keep source line numbers aligned
           continue;
         }
       }
       body.push(l);
     }
 
-    return front + renderBlocks(body, { refs: refs }, false);
+    return front + renderBlocks(body, { refs: refs, root: true, offset: offset }, false);
   }
 
   return { renderMarkdown: renderMarkdown };
@@ -674,6 +694,7 @@ if (typeof window !== 'undefined' && window.addEventListener) {
       var el = document.getElementById('content');
       if (!el) return;
       el.innerHTML = SLIMMD.renderMarkdown(data.markdown || '');
+      markLines(el);
       if (data.reset) window.scrollTo(0, 0);
     } catch (err) {
       if (window.chrome && window.chrome.webview) {
@@ -711,7 +732,7 @@ if (typeof window !== 'undefined' && window.addEventListener) {
     window.requestAnimationFrame(function () {
       scrollPending = false;
       try {
-        window.chrome.webview.postMessage({ type: 'scroll', ratio: SLIMMD.scrollRatio() });
+        window.chrome.webview.postMessage({ type: 'scroll', line: SLIMMD.topLine() });
       } catch (err) { /* host gone */ }
     });
   }, { passive: true });
@@ -725,29 +746,69 @@ if (typeof window !== 'undefined' && window.addEventListener) {
 /** Set while the host is driving the preview scroll, to swallow the echo. */
 var syncing = false;
 
+/**
+ * Turn the `<!--l:N-->` markers emitted by the renderer into data-line
+ * attributes on their blocks (and drop the markers), so scroll sync can map
+ * preview blocks back to editor source lines.
+ */
+function markLines(root) {
+  var node = root.firstChild;
+  while (node) {
+    var next = node.nextSibling;
+    if (node.nodeType === 8) {
+      var m = /^l:(\d+)$/.exec(String(node.nodeValue).trim());
+      if (m) {
+        var el = next;
+        while (el && el.nodeType === 3 && !/\S/.test(el.nodeValue)) el = el.nextSibling;
+        if (el && el.nodeType === 1) el.setAttribute('data-line', m[1]);
+      }
+      if (node.parentNode) node.parentNode.removeChild(node);
+    }
+    node = next;
+  }
+}
+
 /** Render entry point called by the host through ExecuteScriptAsync. */
 SLIMMD.apply = function (markdown, reset) {
   var el = document.getElementById('content');
   if (!el) return;
   el.innerHTML = SLIMMD.renderMarkdown(markdown || '');
+  markLines(el);
   if (reset) window.scrollTo(0, 0);
 };
 
-/** Scroll position of the preview as a 0..1 fraction of the scrollable range. */
-SLIMMD.scrollRatio = function () {
-  var max = document.documentElement.scrollHeight - window.innerHeight;
-  if (max <= 0) return 0;
-  var r = window.scrollY / max;
-  return r < 0 ? 0 : (r > 1 ? 1 : r);
+/** Source line (0-based) shown at the top of the preview viewport. */
+SLIMMD.topLine = function () {
+  var els = document.querySelectorAll('[data-line]');
+  var best = 0;
+  for (var i = 0; i < els.length; i++) {
+    if (els[i].getBoundingClientRect().top <= 1) {
+      best = parseInt(els[i].getAttribute('data-line'), 10) || 0;
+    } else {
+      break;
+    }
+  }
+  return best;
 };
 
-/** Scroll the preview to a 0..1 fraction. Used by the host to follow the editor. */
-SLIMMD.scrollToRatio = function (ratio) {
-  var max = document.documentElement.scrollHeight - window.innerHeight;
-  if (max <= 0) return;
-  var r = ratio < 0 ? 0 : (ratio > 1 ? 1 : ratio);
-  // Suppress the scroll event this generates so it does not echo back to the host.
+/**
+ * Scroll the preview so the block that starts at or before `line` sits at the
+ * top of the viewport. This maps editor lines onto their rendered blocks, so
+ * the two panes stay aligned even though their content is not proportional.
+ */
+SLIMMD.scrollToLine = function (line) {
+  var els = document.querySelectorAll('[data-line]');
+  var target = null;
+  for (var i = 0; i < els.length; i++) {
+    var l = parseInt(els[i].getAttribute('data-line'), 10);
+    if (l <= line) target = els[i];
+    else break;
+  }
+  var y = 0;
+  if (target) y = target.getBoundingClientRect().top + (window.pageYOffset || 0);
+  if (Math.abs((window.pageYOffset || 0) - y) < 1) return;
+  // Suppress the scroll event this generates so it does not echo back.
   syncing = true;
-  window.scrollTo(0, r * max);
+  window.scrollTo(0, y);
   window.setTimeout(function () { syncing = false; }, 120);
 };

@@ -5,15 +5,25 @@ All notable changes to SlimMD.
 ## Unreleased
 
 ### Scroll synchronisation
-- The editor and the preview now follow each other's scroll position in
-  both directions: scrolling the editor moves the preview, and scrolling
-  the preview (or re-showing the editor after browsing) moves the editor,
-  so the rendered result of what you are editing is always in view.
+- Scroll sync is now **block-based** instead of proportional: the renderer
+  tags every root-level block with the source line it came from, and each
+  pane scrolls the other to the *matching block*. Editing at `## 4.` shows
+  section 4 in the preview even though the two panes never carry the same
+  amount of content per screen (headings, code, quotes and tables all have
+  different rendered heights).
+- Works in both directions: scrolling the editor moves the preview, and
+  scrolling the preview (or re-showing the editor after browsing) moves the
+  editor.
+- Removed the 350 ms echo guard — it swallowed legitimate continuous wheel
+  events and let the editor fall several sections behind; the JavaScript
+  `syncing` flag already suppresses our own scroll echo.
 
 ### Multiple documents
 - Multiple Markdown files can be open at once — each gets its own tab
   above the preview (the tab strip stays hidden while only one document
   is open).
+- Tab headers now have an **✕** close button (hover highlight, hand
+  cursor); closing a dirty tab still prompts to save.
 - There is still a single editor pane; switching tabs switches it to that
   document. Save / Save As / Export always act on the active tab.
 - Open dialog supports multi-select, drag & drop opens every dropped
@@ -26,10 +36,15 @@ All notable changes to SlimMD.
 - Closing a tab or the window while any document has unsaved edits asks
   to save first (Yes / No / Cancel). Cancel keeps the tab/window open;
   No discards. Every dirty tab is prompted when closing the window.
+- Fixed the prompt dialog layout: the message text was laid out
+  underneath the button panel and painted invisible (only the buttons
+  showed). The dialog now sizes itself to its content, so the question
+  and the Yes / No / Cancel buttons are all visible.
 
 ### Verification
-- New tests: 11 multi-tab/close-prompt checks (`tools\tabs-test.ps1`),
-  4 scroll-sync checks (`tools\scroll-test.ps1`).
+- New tests: 15 multi-tab/close-prompt/✕ checks (`tools\tabs-test.ps1`),
+  4 scroll-sync checks (`tools\scroll-test.ps1`), 6 block-alignment checks
+  (`tools\blocksync-test.ps1`).
 
 ## 1.0.0 — 2026-11-12
 

@@ -258,7 +258,64 @@ if ($ed) {
     Report "dirty tab gets an asterisk" $false "editor not found"
 }
 
-# --- 5. close the window while dirty -> prompt appears; Cancel keeps it alive ---
+# --- 5. the ✕ glyph on a tab header ---
+function Get-TabClosePoint($tab) {
+    $r = $tab.Current.BoundingRectangle
+    if ($r.Width -le 0) { return $null }
+    # ClosableTabControl draws the glyph at tab.Right-19 .. tab.Right-5.
+    return @([int]($r.X + $r.Width - 12), [int]($r.Y + $r.Height / 2))
+}
+
+function Click-TabClose($tab) {
+    $pt = Get-TabClosePoint $tab
+    if (-not $pt) { return $false }
+    [T2]::SetWindowPos((Get-MainH), [T2]::TOPMOST, 0, 0, 0, 0, 0x1 -bor 0x40) | Out-Null
+    Click-Point $pt[0] $pt[1]
+    return $true
+}
+
+$tabs3 = Get-Tabs
+$dirtyTab = $null; $cleanTab = $null
+foreach ($t in $tabs3) {
+    if ($t.Current.Name -like "tabs_a.md*") { $dirtyTab = $t }
+    if ($t.Current.Name -eq "tabs_b.md") { $cleanTab = $t }
+}
+
+# 5a. clicking ✕ on the dirty tab must prompt (and Cancel keeps both tabs).
+if ($dirtyTab -and (Click-TabClose $dirtyTab)) {
+    Start-Sleep -Milliseconds 1500
+    $dh = Get-DlgHwnd "SlimMD"
+    Report "closing a dirty tab via ✕ prompts" ($dh -ne [IntPtr]::Zero)
+    if ($dh -ne [IntPtr]::Zero) {
+        [System.Windows.Forms.SendKeys]::SendWait("{ESC}")
+        Start-Sleep -Milliseconds 1200
+        $tabs4 = Get-Tabs
+        $vis4 = @($tabs4 | Where-Object { -not $_.Current.IsOffscreen })
+        Report "cancel keeps the dirty tab" ($vis4.Count -eq 2) "count=$($vis4.Count)"
+    } else {
+        Report "cancel keeps the dirty tab" $false "no prompt"
+    }
+} else {
+    Report "closing a dirty tab via ✕ prompts" $false "dirty tab not found"
+    Report "cancel keeps the dirty tab" $false "dirty tab not found"
+}
+
+# 5b. clicking ✕ on a clean tab closes it without prompting; with one document
+# left the tab strip hides itself.
+if ($cleanTab -and (Click-TabClose $cleanTab)) {
+    Start-Sleep -Milliseconds 1500
+    $dh3 = Get-DlgHwnd "SlimMD"
+    $tabs5 = Get-Tabs
+    $vis5 = @($tabs5 | Where-Object { -not $_.Current.IsOffscreen })
+    Report "closing a clean tab via ✕ needs no prompt" ($dh3 -eq [IntPtr]::Zero)
+    # One document left => the whole strip is hidden, so UIA exposes no tab items.
+    Report "tab strip hides with one document" ($tabs5.Count -eq 0) "total=$($tabs5.Count)"
+} else {
+    Report "closing a clean tab via ✕ needs no prompt" $false "clean tab not found"
+    Report "tab strip hides with one document" $false "clean tab not found"
+}
+
+# --- 6. close the window while dirty -> prompt appears; Cancel keeps it alive ---
 [T2]::SetWindowPos((Get-MainH), [T2]::NOTOPMOST, 0, 0, 0, 0, 0x1 -bor 0x40) | Out-Null
 $p.CloseMainWindow() | Out-Null
 Start-Sleep -Milliseconds 1500

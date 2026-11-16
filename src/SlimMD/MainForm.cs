@@ -49,7 +49,6 @@ internal sealed class MainForm : Form
     private bool _previewReady;
     private bool _renderReset;
     private bool _syncingScroll;
-    private DateTime _scrollSyncUntil;
 
     // One entry per open document; the editor/preview always show _docs[_active].
     private sealed class DocTab
@@ -66,7 +65,7 @@ internal sealed class MainForm : Form
     private readonly List<DocTab> _docs = new();
     private int _active;
     private bool _switchingTabs;
-    private readonly TabControl _tabs = new();
+    private readonly ClosableTabControl _tabs = new();
     private readonly ContextMenuStrip _tabMenu = new();
     private ToolStripMenuItem _tabClose = null!;
     private int _tabContextIndex = -1;
@@ -165,9 +164,10 @@ internal sealed class MainForm : Form
         // pane below always shows the active tab's content.
         _tabs.Dock = DockStyle.Top;
         _tabs.Height = Font.Height + 12;
-        _tabs.Padding = new Point(8, 4);
+        _tabs.Padding = new Point(18, 4);
         _tabs.MouseUp += OnTabsMouseUp;
         _tabs.SelectedIndexChanged += OnTabSelected;
+        _tabs.CloseRequested += CloseTab;
 
         _tabClose = new ToolStripMenuItem { Name = "tabClose" };
         _tabClose.Click += (_, _) => CloseTab(_tabContextIndex);
@@ -441,7 +441,7 @@ internal sealed class MainForm : Form
                 _loading = false;
                 _editor.SelectionStart = 0;
                 _renderReset = true;
-                _lastPushedRatio = -1;
+                _lastPushedLine = -1;
                 UpdateDocRoot();
                 UpdateTitle();
                 UpdateStatus();
@@ -717,7 +717,6 @@ internal sealed class MainForm : Form
     private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
 
     private const int EmGetFirstVisibleLine = 0x00CE;
-    private const int EmGetLineCount = 0x00BA;
     private const int EmLineScroll = 0x00B6;
 
     /// <summary>Multiline TextBox that reports WM_VSCROLL / WM_MOUSEWHEEL / WM_HSCROLL.</summary>
@@ -735,32 +734,20 @@ internal sealed class MainForm : Form
         }
     }
 
-    /// <summary>Editor scroll position as a 0..1 fraction of the scrollable range.</summary>
-    private double EditorScrollRatio()
+    /// <summary>First visible editor line (0-based). Editor has word-wrap off,
+    /// so editor lines map 1:1 onto source lines.</summary>
+    private int EditorFirstLine()
     {
         if (!_editor.IsHandleCreated) return 0;
-        var first = SendMessage(_editor.Handle, EmGetFirstVisibleLine, IntPtr.Zero, IntPtr.Zero).ToInt32();
-        var count = SendMessage(_editor.Handle, EmGetLineCount, IntPtr.Zero, IntPtr.Zero).ToInt32();
-        var lineHeight = Math.Max(1, _editor.Font.Height);
-        var visible = Math.Max(1, _editor.ClientSize.Height / lineHeight);
-        var maxFirst = count - visible;
-        if (maxFirst <= 0) return 0;
-        var ratio = (double)first / maxFirst;
-        return ratio < 0 ? 0 : ratio > 1 ? 1 : ratio;
+        return SendMessage(_editor.Handle, EmGetFirstVisibleLine, IntPtr.Zero, IntPtr.Zero).ToInt32();
     }
 
-    /// <summary>Moves the editor's viewport to a 0..1 fraction (used to follow the preview).</summary>
-    private void ScrollEditorToRatio(double ratio)
+    /// <summary>Moves the editor so `line` becomes the first visible line (used to follow the preview).</summary>
+    private void ScrollEditorToLine(int line)
     {
         if (!_showEditor || !_editor.IsHandleCreated) return;
-        var first = SendMessage(_editor.Handle, EmGetFirstVisibleLine, IntPtr.Zero, IntPtr.Zero).ToInt32();
-        var count = SendMessage(_editor.Handle, EmGetLineCount, IntPtr.Zero, IntPtr.Zero).ToInt32();
-        var lineHeight = Math.Max(1, _editor.Font.Height);
-        var visible = Math.Max(1, _editor.ClientSize.Height / lineHeight);
-        var maxFirst = count - visible;
-        if (maxFirst <= 0) return;
-        var r = ratio < 0 ? 0 : ratio > 1 ? 1 : ratio;
-        var delta = (int)Math.Round(r * maxFirst) - first;
+        var first = EditorFirstLine();
+        var delta = line - first;
         if (delta == 0) return;
         _syncingScroll = true;
         try
@@ -773,24 +760,112 @@ internal sealed class MainForm : Form
         }
     }
 
-    /// <summary>Editor viewport -> preview (the "see my edit immediately" direction).</summary>
+    /// <summary>Editor viewport -> preview (the "see my edit immediately" direction).
+    /// Scrolls the preview to the block the editor's top line belongs to.</summary>
     private void SyncScrollToPreview()
     {
         if (_syncingScroll || !_showEditor || _loading || _normalizing) return;
         var core = _preview.CoreWebView2;
         if (core == null || !_previewReady) return;
 
-        var ratio = EditorScrollRatio();
-        if (Math.Abs(ratio - _lastPushedRatio) < 0.002) return;
-        _lastPushedRatio = ratio;
-        _scrollSyncUntil = DateTime.UtcNow.AddMilliseconds(350);
-        _ = core.ExecuteScriptAsync(
-            $"SLIMMD.scrollToRatio({ratio.ToString("0.####", CultureInfo.InvariantCulture)});");
+        var line = EditorFirstLine();
+        if (line == _lastPushedLine) return;
+        _lastPushedLine = line;
+        _ = core.ExecuteScriptAsync($"SLIMMD.scrollToLine({line});");
     }
 
-    private double _lastPushedRatio = -1;
+    private int _lastPushedLine = -1;
 
     // ---------------------------------------------------------------- tabs
+
+    /// <summary>
+    /// TabControl that overlays a small ✕ close glyph on every tab header.
+    /// The native header painting is kept (base WndProc); the glyph is drawn
+    /// on top after each WM_PAINT, so the visual style stays intact.
+    /// </summary>
+    private sealed class ClosableTabControl : TabControl
+    {
+        public event Action<int>? CloseRequested;
+
+        private int _hoverTab = -1;
+
+        private static Rectangle CloseRect(Rectangle tab) =>
+            new(tab.Right - 19, tab.Top + (tab.Height - 14) / 2, 14, 14);
+
+        private int HitTestClose(Point p)
+        {
+            for (var i = 0; i < TabPages.Count; i++)
+            {
+                if (CloseRect(GetTabRect(i)).Contains(p)) return i;
+            }
+
+            return -1;
+        }
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            base.OnMouseMove(e);
+            var idx = HitTestClose(e.Location);
+            if (idx != _hoverTab)
+            {
+                _hoverTab = idx;
+                Invalidate();
+            }
+
+            Cursor = idx >= 0 ? Cursors.Hand : Cursors.Default;
+        }
+
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            base.OnMouseLeave(e);
+            if (_hoverTab != -1)
+            {
+                _hoverTab = -1;
+                Invalidate();
+            }
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            base.OnMouseDown(e);
+            if (e.Button == MouseButtons.Left)
+            {
+                var idx = HitTestClose(e.Location);
+                if (idx >= 0) CloseRequested?.Invoke(idx);
+            }
+        }
+
+        protected override void WndProc(ref Message m)
+        {
+            base.WndProc(ref m);
+            if (m.Msg == 0x000F) DrawCloseGlyphs();   // WM_PAINT
+        }
+
+        private void DrawCloseGlyphs()
+        {
+            if (DesignMode || !IsHandleCreated || TabPages.Count == 0) return;
+
+            using var g = CreateGraphics();
+            for (var i = 0; i < TabPages.Count; i++)
+            {
+                var box = CloseRect(GetTabRect(i));
+                var hover = i == _hoverTab;
+                if (hover)
+                {
+                    using var bg = new SolidBrush(Color.FromArgb(70, 120, 120, 120));
+                    g.FillEllipse(bg, box);
+                }
+
+                using var pen = new Pen(hover ? Color.FromArgb(40, 40, 40) : Color.FromArgb(130, 130, 130), 1.4f);
+                var l = box.Left + 4;
+                var r = box.Right - 4;
+                var t = box.Top + 4;
+                var b = box.Bottom - 4;
+                g.DrawLine(pen, l, t, r, b);
+                g.DrawLine(pen, r, t, l, b);
+            }
+        }
+    }
 
     private void OnTabSelected(object? sender, EventArgs e)
     {
@@ -842,8 +917,7 @@ internal sealed class MainForm : Form
         _editor.SelectionStart = caret;
         _editor.SelectionLength = 0;
         _renderReset = false;
-        _lastPushedRatio = -1;
-        _scrollSyncUntil = DateTime.MinValue;
+        _lastPushedLine = -1;
         UpdateDocRoot();
         UpdateTitle();
         UpdateStatus();
@@ -931,7 +1005,7 @@ internal sealed class MainForm : Form
             _loading = false;
             _editor.SelectionStart = 0;
             _renderReset = true;
-            _lastPushedRatio = -1;
+            _lastPushedLine = -1;
             StashActive();
             UpdateDocRoot();
             UpdateTitle();
@@ -1052,11 +1126,10 @@ internal sealed class MainForm : Form
         {
             var core = _preview.CoreWebView2;
             if (core == null || !_previewReady || !_showEditor) return;
-            var json = await core.ExecuteScriptAsync("SLIMMD.scrollRatio()");
-            if (double.TryParse(json, NumberStyles.Float, CultureInfo.InvariantCulture, out var ratio))
+            var json = await core.ExecuteScriptAsync("SLIMMD.topLine()");
+            if (int.TryParse(json, NumberStyles.Integer, CultureInfo.InvariantCulture, out var line))
             {
-                _scrollSyncUntil = DateTime.UtcNow.AddMilliseconds(350);
-                ScrollEditorToRatio(ratio);
+                ScrollEditorToLine(line);
             }
         }
         catch (Exception ex)
@@ -1240,16 +1313,15 @@ internal sealed class MainForm : Form
                     RenderPreview();
                 }
                 else if (typeName == "scroll" && _showEditor && !_loading &&
-                         doc.RootElement.TryGetProperty("ratio", out var ratioEl) &&
-                         DateTime.UtcNow >= _scrollSyncUntil)
+                         doc.RootElement.TryGetProperty("line", out var lineEl))
                 {
-                    // Preview viewport -> editor. Guarded by _scrollSyncUntil so the
-                    // echo of our own scrollToRatio() does not fight the user.
-                    if (double.TryParse(ratioEl.GetRawText(), NumberStyles.Float,
-                            CultureInfo.InvariantCulture, out var ratio))
+                    // Preview viewport -> editor: move the editor to the source
+                    // line of the block at the top of the preview. Our own
+                    // scrollToLine() echo is swallowed by the JS `syncing` flag,
+                    // so no time-based guard is needed here.
+                    if (lineEl.TryGetInt32(out var line))
                     {
-                        _scrollSyncUntil = DateTime.UtcNow.AddMilliseconds(350);
-                        BeginInvoke(() => ScrollEditorToRatio(ratio));
+                        BeginInvoke(() => ScrollEditorToLine(line));
                     }
                 }
                 else if (typeName == "shortcut" && !_editor.Focused && IsHandleCreated &&
@@ -1299,7 +1371,7 @@ internal sealed class MainForm : Form
             // viewport so the line being edited stays visible.
             if (!wasReset && IsHandleCreated)
             {
-                _lastPushedRatio = -1;
+                _lastPushedLine = -1;
                 try { BeginInvoke((Action)SyncScrollToPreview); }
                 catch (InvalidOperationException) { /* handle gone */ }
             }
