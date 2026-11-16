@@ -701,11 +701,29 @@ if (typeof window !== 'undefined' && window.addEventListener) {
     window.chrome.webview.postMessage({ type: 'shortcut', action: action });
   });
 
+  // Report the preview scroll position to the host so it can follow the
+  // editor (and vice versa). Throttled to one message per animation frame.
+  var scrollPending = false;
+  window.addEventListener('scroll', function () {
+    if (syncing || scrollPending) return;
+    if (!window.chrome || !window.chrome.webview) return;
+    scrollPending = true;
+    window.requestAnimationFrame(function () {
+      scrollPending = false;
+      try {
+        window.chrome.webview.postMessage({ type: 'scroll', ratio: SLIMMD.scrollRatio() });
+      } catch (err) { /* host gone */ }
+    });
+  }, { passive: true });
+
   // Tell the host that the listener is registered and ready for content.
   if (window.chrome && window.chrome.webview) {
     window.chrome.webview.postMessage({ type: 'ready' });
   }
 }
+
+/** Set while the host is driving the preview scroll, to swallow the echo. */
+var syncing = false;
 
 /** Render entry point called by the host through ExecuteScriptAsync. */
 SLIMMD.apply = function (markdown, reset) {
@@ -713,4 +731,23 @@ SLIMMD.apply = function (markdown, reset) {
   if (!el) return;
   el.innerHTML = SLIMMD.renderMarkdown(markdown || '');
   if (reset) window.scrollTo(0, 0);
+};
+
+/** Scroll position of the preview as a 0..1 fraction of the scrollable range. */
+SLIMMD.scrollRatio = function () {
+  var max = document.documentElement.scrollHeight - window.innerHeight;
+  if (max <= 0) return 0;
+  var r = window.scrollY / max;
+  return r < 0 ? 0 : (r > 1 ? 1 : r);
+};
+
+/** Scroll the preview to a 0..1 fraction. Used by the host to follow the editor. */
+SLIMMD.scrollToRatio = function (ratio) {
+  var max = document.documentElement.scrollHeight - window.innerHeight;
+  if (max <= 0) return;
+  var r = ratio < 0 ? 0 : (ratio > 1 ? 1 : ratio);
+  // Suppress the scroll event this generates so it does not echo back to the host.
+  syncing = true;
+  window.scrollTo(0, r * max);
+  window.setTimeout(function () { syncing = false; }, 120);
 };

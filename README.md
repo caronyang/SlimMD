@@ -18,10 +18,20 @@ instantly, and handles `.md` files with proper encoding (UTF-8 / Big5 / GBK).
 
   ![SlimMD split view](art/readme_split_en.png)
 
+- **Scroll sync** — the editor and the preview follow each other's scroll
+  position in both directions, so the preview always shows the part of the
+  document you are working on.
+
 - **Open / New / Save / Save As** — `Ctrl+O`, `Ctrl+N`, `Ctrl+S`, `Ctrl+Shift+S`.
-  All shortcuts work in both browse and edit view. Drag & drop a `.md` file
-  onto the window to open it. Files can also be passed on the command line:
-  `SlimMD.exe notes.md`.
+  All shortcuts work in both browse and edit view. Drag & drop `.md` files
+  onto the window to open them. Files can also be passed on the command line:
+  `SlimMD.exe notes.md todo.md`.
+- **Multiple documents in tabs** — open as many Markdown files as you like;
+  each one gets its own tab above the preview. Switching tabs switches the
+  single editor pane to that document, and save/export always act on the
+  active tab. Unsaved tabs are marked with `*`.
+- **Unsaved-changes prompt** — closing a tab or the window while a document
+  has unsaved edits asks you to save first (Yes / No / Cancel).
 - **Encoding done right** — UTF-8 (with or without BOM) is detected
   automatically, with fallback to the system ANSI code page (Big5 / GBK /
   Windows-1252 …). The file's original line-ending style (CRLF / LF) and
@@ -90,6 +100,8 @@ Useful flags: `-SkipIcon`, `-SkipTests`, `-SkipInstaller`.
 | `node tests\render.test.js` | Markdown renderer — 58 unit tests |
 | `powershell -File tools\e2e.ps1` | UI end-to-end — 34 checks (browse/split toggle, shortcuts from both views, selection, export menu, About dialog, EN/ZH switch, settings persistence) |
 | `powershell -File tools\export-test.ps1` | Export flow (menu → Save dialog → PDF/HTML on disk) — 17 checks |
+| `powershell -File tools\tabs-test.ps1` | Multi-tab documents + unsaved-close prompt — 11 checks |
+| `powershell -File tools\scroll-test.ps1` | Editor ↔ preview scroll synchronisation (both directions) — 4 checks |
 | `powershell -File tools\installer-test.ps1` | Shipped installer: silent install → run → Export menu → uninstall — 6 checks |
 
 ## Project layout

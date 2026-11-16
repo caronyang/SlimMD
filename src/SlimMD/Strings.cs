@@ -55,6 +55,7 @@ internal static class L
 
         // Files
         ["file.untitled"] = ("Untitled", "未命名"),
+        ["tab.close"] = ("Close Tab", "關閉頁籤"),
         ["filter.markdown"] = ("Markdown files (*.md;*.markdown;*.mdown;*.mkd;*.txt)|*.md;*.markdown;*.mdown;*.mkd;*.txt", "Markdown 檔案 (*.md;*.markdown;*.mdown;*.mkd;*.txt)|*.md;*.markdown;*.mdown;*.mkd;*.txt"),
         ["filter.all"] = ("All files (*.*)|*.*", "所有檔案 (*.*)|*.*"),
         ["dialog.open"] = ("Open Markdown file", "開啟 Markdown 檔案"),

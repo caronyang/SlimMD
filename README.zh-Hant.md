@@ -16,9 +16,16 @@
 
   ![SlimMD 分割檢視](art/readme_split_en.png)
 
+- **捲動同步** — 編輯區與預覽區的捲動位置雙向同步，編輯到哪裡，
+  預覽就即時跟到哪裡。
 - **開啟 / 新建 / 儲存 / 另存新檔** — `Ctrl+O`、`Ctrl+N`、`Ctrl+S`、
   `Ctrl+Shift+S`，瀏覽與編輯模式皆可使用。也可將 `.md` 檔拖放至視窗開啟，
-  或在命令列傳入檔案：`SlimMD.exe notes.md`。
+  或在命令列傳入檔案：`SlimMD.exe notes.md todo.md`。
+- **多檔案頁籤** — 可同時開啟多個 Markdown 檔，每個檔案在預覽區上方各佔
+  一個頁籤。切換頁籤時，唯一的編輯區會同步切換成該檔案的內容；儲存與匯出
+  皆作用於目前頁籤，未存檔的頁籤會標示 `*`。
+- **未存檔提醒** — 關閉頁籤或關閉視窗時，若檔案已編輯但尚未存檔，
+  會先詢問是否存檔（是／否／取消）。
 - **編碼正確處理** — 自動偵測 UTF-8（含/不含 BOM），並回退至系統 ANSI
   碼頁（Big5 / GBK / Windows-1252 …）。儲存時保留檔案原有的行尾格式
   （CRLF / LF）與編碼。
@@ -82,6 +89,8 @@ powershell -ExecutionPolicy Bypass -File build.ps1
 | `node tests\render.test.js` | Markdown 渲染器 — 58 個單元測試 |
 | `powershell -File tools\e2e.ps1` | UI 端對端 — 34 項檢查（瀏覽/分割切換、兩種模式的快捷鍵、文字選取、匯出選單、關於對話框、中英切換、設定持久化） |
 | `powershell -File tools\export-test.ps1` | 匯出流程（選單 → 儲存對話框 → PDF/HTML 落盤）— 17 項檢查 |
+| `powershell -File tools\tabs-test.ps1` | 多檔案頁籤 + 未存檔關閉提醒 — 11 項檢查 |
+| `powershell -File tools\scroll-test.ps1` | 編輯區 ↔ 預覽區捲動同步（雙向）— 4 項檢查 |
 | `powershell -File tools\installer-test.ps1` | 正式安裝檔：靜默安裝 → 執行 → 匯出選單 → 解除安裝 — 6 項檢查 |
 
 ## 專案結構

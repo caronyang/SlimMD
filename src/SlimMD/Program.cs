@@ -18,6 +18,6 @@ internal static class Program
             MsgDialog.Show(null, L.T("msg.error"), e.Exception.Message, MessageBoxIcon.Error, L.T("btn.ok"));
         };
 
-        Application.Run(new MainForm(args.FirstOrDefault()));
+        Application.Run(new MainForm(args));
     }
 }

@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Globalization;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -13,8 +15,8 @@ internal sealed class MainForm : Form
     private const string AppHost = "app";
 
     private readonly AppSettings _settings;
-    private readonly string? _startupFile;
-    private readonly TextBox _editor = new();
+    private readonly IReadOnlyList<string> _startupFiles;
+    private readonly EditorBox _editor = new();
     private readonly WebView2 _preview = new();
     private readonly Label _previewFallback = new();
     private readonly SplitContainer _split = new();
@@ -46,10 +48,32 @@ internal sealed class MainForm : Form
     private bool _showEditor;
     private bool _previewReady;
     private bool _renderReset;
+    private bool _syncingScroll;
+    private DateTime _scrollSyncUntil;
 
-    public MainForm(string? startupFile = null)
+    // One entry per open document; the editor/preview always show _docs[_active].
+    private sealed class DocTab
     {
-        _startupFile = startupFile;
+        public TabPage Page = null!;
+        public string? FilePath;
+        public Encoding Encoding = new UTF8Encoding(false);
+        public string Eol = "\r\n";
+        public bool Dirty;
+        public string Text = "";
+        public int Caret;
+    }
+
+    private readonly List<DocTab> _docs = new();
+    private int _active;
+    private bool _switchingTabs;
+    private readonly TabControl _tabs = new();
+    private readonly ContextMenuStrip _tabMenu = new();
+    private ToolStripMenuItem _tabClose = null!;
+    private int _tabContextIndex = -1;
+
+    public MainForm(IReadOnlyList<string>? startupFiles = null)
+    {
+        _startupFiles = startupFiles ?? Array.Empty<string>();
         _settings = AppSettings.Load();
         L.Current = _settings.Language == "zh" ? Lang.Zh : Lang.En;
 
@@ -80,9 +104,14 @@ internal sealed class MainForm : Form
         Load += async (_, _) =>
         {
             await InitPreviewAsync();
-            if (!string.IsNullOrEmpty(_startupFile) && File.Exists(_startupFile))
+            var opened = false;
+            foreach (var f in _startupFiles)
             {
-                OpenFile(_startupFile);
+                if (File.Exists(f))
+                {
+                    OpenFile(f, newTab: opened || _docs.Count > 1);
+                    opened = true;
+                }
             }
         };
     }
@@ -132,6 +161,18 @@ internal sealed class MainForm : Form
         _toolStrip.Items.Add(new ToolStripSeparator());
         _toolStrip.Items.Add(_btnAbout);
 
+        // Document tabs sit above the preview (browse area); the single editor
+        // pane below always shows the active tab's content.
+        _tabs.Dock = DockStyle.Top;
+        _tabs.Height = Font.Height + 12;
+        _tabs.Padding = new Point(8, 4);
+        _tabs.MouseUp += OnTabsMouseUp;
+        _tabs.SelectedIndexChanged += OnTabSelected;
+
+        _tabClose = new ToolStripMenuItem { Name = "tabClose" };
+        _tabClose.Click += (_, _) => CloseTab(_tabContextIndex);
+        _tabMenu.Items.Add(_tabClose);
+
         // Editor pane
         _editor.Multiline = true;
         _editor.AcceptsTab = true;
@@ -145,8 +186,17 @@ internal sealed class MainForm : Form
         _editor.Dock = DockStyle.Fill;
         _editor.MaxLength = int.MaxValue;
         _editor.TextChanged += OnEditorTextChanged;
-        _editor.MouseUp += (_, _) => UpdateCursorStatus();
-        _editor.KeyUp += (_, _) => UpdateCursorStatus();
+        _editor.MouseUp += (_, _) =>
+        {
+            UpdateCursorStatus();
+            SyncScrollToPreview();
+        };
+        _editor.KeyUp += (_, _) =>
+        {
+            UpdateCursorStatus();
+            SyncScrollToPreview();
+        };
+        _editor.Scrolled += SyncScrollToPreview;
 
         // The first focus in a freshly loaded document selects all of it (Win32 EDIT
         // behaviour). Collapse that back to a caret - otherwise the first keystroke in
@@ -184,6 +234,7 @@ internal sealed class MainForm : Form
         _split.Panel1.Controls.Add(_editor);
         _split.Panel2.Controls.Add(_preview);
         _split.Panel2.Controls.Add(_previewFallback);
+        _split.Panel2.Controls.Add(_tabs);
 
         _statusStrip.Dock = DockStyle.Bottom;
         _statusStrip.BackColor = Color.FromArgb(246, 248, 250);
@@ -207,6 +258,16 @@ internal sealed class MainForm : Form
         _btnSaveAs.Click += (_, _) => SaveFileAs();
         _btnEdit.Click += (_, _) => ToggleEditor();
         _btnAbout.Click += (_, _) => ShowAbout();
+
+        // One untitled document to start with (the tab strip stays hidden
+        // until a second document is opened).
+        var first = new DocTab();
+        first.Page = new TabPage(TabLabel(first));
+        _docs.Add(first);
+        _tabs.TabPages.Add(first.Page);
+        _active = 0;
+        _tabs.SelectedIndex = 0;
+        UpdateTabHeaders();
     }
 
     private ToolStripButton NewButton(string name, string textKey, string tipKey)
@@ -242,6 +303,7 @@ internal sealed class MainForm : Form
         _exportHtml.Text = L.T("export.html");
         _langEn.Checked = L.Current == Lang.En;
         _langZh.Checked = L.Current == Lang.Zh;
+        _tabClose.Text = L.T("tab.close");
         UpdateEditorVisibility(animated: false);
         UpdateTitle();
         UpdateStatus();
@@ -275,7 +337,13 @@ internal sealed class MainForm : Form
 
     private void OnFormClosing(object? sender, FormClosingEventArgs e)
     {
-        if (!ConfirmDiscard()) return;
+        // Prompt for unsaved changes in every open tab; Cancel (or a failed
+        // save) must keep the window open.
+        if (!ConfirmAllDiscarded())
+        {
+            e.Cancel = true;
+            return;
+        }
 
         if (WindowState == FormWindowState.Normal)
         {
@@ -295,23 +363,17 @@ internal sealed class MainForm : Form
 
     private void NewFile()
     {
-        if (!ConfirmDiscard()) return;
-        _filePath = null;
-        _encoding = new UTF8Encoding(false);
-        _eol = "\r\n";
-        _loading = true;
-        _editor.Clear();
-        _loading = false;
-        _dirty = false;
-        _renderReset = true;
-        UpdateDocRoot();
-        UpdateTitle();
-        UpdateStatus();
-        ScheduleRender();
+        if (IsBlankUntitled())
+        {
+            _editor.Focus();
+            return;
+        }
+
+        AddTab(null, "", new UTF8Encoding(false), "\r\n", dirty: false);
         _editor.Focus();
     }
 
-    private void OpenFile(string? path = null)
+    private void OpenFile(string? path = null, bool newTab = false)
     {
         if (path == null)
         {
@@ -320,6 +382,7 @@ internal sealed class MainForm : Form
                 Title = L.T("dialog.open"),
                 Filter = L.T("filter.markdown") + "|" + L.T("filter.all"),
                 CheckFileExists = true,
+                Multiselect = true,
             };
             if (!string.IsNullOrEmpty(_settings.LastDirectory) && Directory.Exists(_settings.LastDirectory))
             {
@@ -327,28 +390,67 @@ internal sealed class MainForm : Form
             }
 
             if (dlg.ShowDialog(this) != DialogResult.OK) return;
-            path = dlg.FileName;
+            var files = dlg.FileNames;
+            for (var i = 0; i < files.Length; i++)
+            {
+                OpenFile(files[i], newTab: i > 0 || !IsBlankUntitled());
+            }
+
+            return;
         }
 
-        if (!ConfirmDiscard()) return;
+        string full;
+        try
+        {
+            full = Path.GetFullPath(path);
+        }
+        catch (Exception ex)
+        {
+            MsgDialog.Show(this, L.T("msg.error"), L.T("msg.openFailed", ex.Message), MessageBoxIcon.Error, L.T("btn.ok"));
+            return;
+        }
+
+        // Already open in a tab? Just switch to it.
+        var existing = _docs.FindIndex(d =>
+            d.FilePath != null && string.Equals(d.FilePath, full, StringComparison.OrdinalIgnoreCase));
+        if (existing >= 0)
+        {
+            ActivateTab(existing);
+            return;
+        }
 
         try
         {
-            var (text, encoding) = ReadAllTextAuto(path);
-            _eol = text.Contains("\r\n") ? "\r\n" : (text.Contains("\n") ? "\n" : "\r\n");
-            _loading = true;
-            _editor.Text = ToEditorEol(text);
-            _loading = false;
-            _filePath = Path.GetFullPath(path);
-            _encoding = encoding;
-            _dirty = false;
-            _renderReset = true;
-            _settings.LastDirectory = Path.GetDirectoryName(_filePath) ?? "";
+            var (text, encoding) = ReadAllTextAuto(full);
+            var eol = text.Contains("\r\n") ? "\r\n" : (text.Contains("\n") ? "\n" : "\r\n");
+            var editorText = ToEditorEol(text);
+            _settings.LastDirectory = Path.GetDirectoryName(full) ?? "";
             _settings.Save();
-            UpdateDocRoot();
-            UpdateTitle();
-            UpdateStatus();
-            ScheduleRender();
+
+            if (!newTab && IsBlankUntitled())
+            {
+                // Fill the single empty tab instead of stacking a blank one.
+                StashActive();
+                _active = 0;
+                _filePath = full;
+                _encoding = encoding;
+                _eol = eol;
+                _dirty = false;
+                _loading = true;
+                _editor.Text = editorText;
+                _loading = false;
+                _editor.SelectionStart = 0;
+                _renderReset = true;
+                _lastPushedRatio = -1;
+                UpdateDocRoot();
+                UpdateTitle();
+                UpdateStatus();
+                UpdateTabHeaders();
+                ScheduleRender();
+                return;
+            }
+
+            AddTab(full, editorText, encoding, eol, dirty: false);
         }
         catch (Exception ex)
         {
@@ -374,6 +476,7 @@ internal sealed class MainForm : Form
 
             File.WriteAllText(_filePath, content, _encoding);
             _dirty = false;
+            StashActive();
             UpdateTitle();
             UpdateStatus();
             return true;
@@ -608,6 +711,265 @@ internal sealed class MainForm : Form
         return (ansi.GetString(bytes), ansi);
     }
 
+    // ---------------------------------------------------------------- scroll sync
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+
+    private const int EmGetFirstVisibleLine = 0x00CE;
+    private const int EmGetLineCount = 0x00BA;
+    private const int EmLineScroll = 0x00B6;
+
+    /// <summary>Multiline TextBox that reports WM_VSCROLL / WM_MOUSEWHEEL / WM_HSCROLL.</summary>
+    private sealed class EditorBox : TextBox
+    {
+        public event Action? Scrolled;
+
+        protected override void WndProc(ref Message m)
+        {
+            base.WndProc(ref m);
+            if (m.Msg is 0x0115 or 0x0114 or 0x020A)
+            {
+                Scrolled?.Invoke();
+            }
+        }
+    }
+
+    /// <summary>Editor scroll position as a 0..1 fraction of the scrollable range.</summary>
+    private double EditorScrollRatio()
+    {
+        if (!_editor.IsHandleCreated) return 0;
+        var first = SendMessage(_editor.Handle, EmGetFirstVisibleLine, IntPtr.Zero, IntPtr.Zero).ToInt32();
+        var count = SendMessage(_editor.Handle, EmGetLineCount, IntPtr.Zero, IntPtr.Zero).ToInt32();
+        var lineHeight = Math.Max(1, _editor.Font.Height);
+        var visible = Math.Max(1, _editor.ClientSize.Height / lineHeight);
+        var maxFirst = count - visible;
+        if (maxFirst <= 0) return 0;
+        var ratio = (double)first / maxFirst;
+        return ratio < 0 ? 0 : ratio > 1 ? 1 : ratio;
+    }
+
+    /// <summary>Moves the editor's viewport to a 0..1 fraction (used to follow the preview).</summary>
+    private void ScrollEditorToRatio(double ratio)
+    {
+        if (!_showEditor || !_editor.IsHandleCreated) return;
+        var first = SendMessage(_editor.Handle, EmGetFirstVisibleLine, IntPtr.Zero, IntPtr.Zero).ToInt32();
+        var count = SendMessage(_editor.Handle, EmGetLineCount, IntPtr.Zero, IntPtr.Zero).ToInt32();
+        var lineHeight = Math.Max(1, _editor.Font.Height);
+        var visible = Math.Max(1, _editor.ClientSize.Height / lineHeight);
+        var maxFirst = count - visible;
+        if (maxFirst <= 0) return;
+        var r = ratio < 0 ? 0 : ratio > 1 ? 1 : ratio;
+        var delta = (int)Math.Round(r * maxFirst) - first;
+        if (delta == 0) return;
+        _syncingScroll = true;
+        try
+        {
+            SendMessage(_editor.Handle, EmLineScroll, IntPtr.Zero, (IntPtr)delta);
+        }
+        finally
+        {
+            _syncingScroll = false;
+        }
+    }
+
+    /// <summary>Editor viewport -> preview (the "see my edit immediately" direction).</summary>
+    private void SyncScrollToPreview()
+    {
+        if (_syncingScroll || !_showEditor || _loading || _normalizing) return;
+        var core = _preview.CoreWebView2;
+        if (core == null || !_previewReady) return;
+
+        var ratio = EditorScrollRatio();
+        if (Math.Abs(ratio - _lastPushedRatio) < 0.002) return;
+        _lastPushedRatio = ratio;
+        _scrollSyncUntil = DateTime.UtcNow.AddMilliseconds(350);
+        _ = core.ExecuteScriptAsync(
+            $"SLIMMD.scrollToRatio({ratio.ToString("0.####", CultureInfo.InvariantCulture)});");
+    }
+
+    private double _lastPushedRatio = -1;
+
+    // ---------------------------------------------------------------- tabs
+
+    private void OnTabSelected(object? sender, EventArgs e)
+    {
+        if (_switchingTabs) return;
+        if (_tabs.SelectedIndex >= 0 && _tabs.SelectedIndex != _active)
+        {
+            ActivateTab(_tabs.SelectedIndex);
+        }
+    }
+
+    private void OnTabsMouseUp(object? sender, MouseEventArgs e)
+    {
+        if (e.Button != MouseButtons.Right) return;
+        var idx = -1;
+        for (var i = 0; i < _tabs.TabPages.Count; i++)
+        {
+            if (_tabs.GetTabRect(i).Contains(e.Location)) { idx = i; break; }
+        }
+        if (idx < 0 || idx >= _docs.Count) return;
+        _tabContextIndex = idx;
+        _tabMenu.Show(_tabs, e.Location);
+    }
+
+    /// <summary>Copies the live editor state into the active DocTab.</summary>
+    private void StashActive()
+    {
+        if (_active < 0 || _active >= _docs.Count) return;
+        var d = _docs[_active];
+        d.FilePath = _filePath;
+        d.Encoding = _encoding;
+        d.Eol = _eol;
+        d.Dirty = _dirty;
+        d.Text = _editor.Text;
+        d.Caret = _editor.SelectionStart;
+    }
+
+    /// <summary>Restores a DocTab into the live editor state.</summary>
+    private void LoadTab(int index)
+    {
+        var d = _docs[index];
+        _filePath = d.FilePath;
+        _encoding = d.Encoding;
+        _eol = d.Eol;
+        _dirty = d.Dirty;
+        _loading = true;
+        _editor.Text = d.Text;
+        _loading = false;
+        var caret = Math.Min(Math.Max(0, d.Caret), _editor.TextLength);
+        _editor.SelectionStart = caret;
+        _editor.SelectionLength = 0;
+        _renderReset = false;
+        _lastPushedRatio = -1;
+        _scrollSyncUntil = DateTime.MinValue;
+        UpdateDocRoot();
+        UpdateTitle();
+        UpdateStatus();
+        UpdateTabHeaders();
+        try { _editor.ScrollToCaret(); }
+        catch (InvalidOperationException) { /* no handle yet */ }
+        ScheduleRender();
+    }
+
+    private void ActivateTab(int index)
+    {
+        if (index < 0 || index >= _docs.Count || index == _active) return;
+        StashActive();
+        _active = index;
+        _switchingTabs = true;
+        _tabs.SelectedIndex = index;
+        _switchingTabs = false;
+        LoadTab(index);
+        if (_showEditor) _editor.Focus();
+    }
+
+    /// <summary>Adds a document tab and makes it active. Pass text/path for a file.</summary>
+    private int AddTab(string? path, string text, Encoding encoding, string eol, bool dirty)
+    {
+        StashActive();
+        var doc = new DocTab
+        {
+            FilePath = path,
+            Encoding = encoding,
+            Eol = eol,
+            Dirty = dirty,
+            Text = text,
+        };
+        _docs.Add(doc);
+        doc.Page = new TabPage(TabLabel(doc));
+        _tabs.TabPages.Add(doc.Page);
+        _active = _docs.Count - 1;
+        _switchingTabs = true;
+        _tabs.SelectedIndex = _active;
+        _switchingTabs = false;
+        LoadTab(_active);
+        UpdateTabHeaders();
+        return _active;
+    }
+
+    /// <summary>Reuses the single blank untitled tab instead of stacking empty ones.</summary>
+    private bool IsBlankUntitled() =>
+        _docs.Count == 1 && _filePath == null && !_dirty && _editor.TextLength == 0;
+
+    private static string TabLabel(DocTab d)
+    {
+        var name = d.FilePath == null ? L.T("file.untitled") : Path.GetFileName(d.FilePath);
+        return d.Dirty ? name + "*" : name;
+    }
+
+    private void UpdateTabHeaders()
+    {
+        _tabs.Visible = _docs.Count > 1;
+        for (var i = 0; i < _docs.Count && i < _tabs.TabPages.Count; i++)
+        {
+            // The active doc lives in the editor fields, not yet in _docs[i].
+            var probe = i == _active
+                ? new DocTab { FilePath = _filePath, Dirty = _dirty }
+                : _docs[i];
+            var label = TabLabel(probe);
+            if (_tabs.TabPages[i].Text != label) _tabs.TabPages[i].Text = label;
+        }
+    }
+
+    private void CloseTab(int index)
+    {
+        if (index < 0 || index >= _docs.Count) return;
+        ActivateTab(index);
+
+        if (_docs.Count == 1)
+        {
+            // Last tab: clear it (New behaviour) instead of leaving no document.
+            if (!ConfirmDiscard()) return;
+            _filePath = null;
+            _encoding = new UTF8Encoding(false);
+            _eol = "\r\n";
+            _dirty = false;
+            _loading = true;
+            _editor.Clear();
+            _loading = false;
+            _editor.SelectionStart = 0;
+            _renderReset = true;
+            _lastPushedRatio = -1;
+            StashActive();
+            UpdateDocRoot();
+            UpdateTitle();
+            UpdateStatus();
+            ScheduleRender();
+            return;
+        }
+
+        if (!ConfirmDiscard()) return;
+
+        _tabs.TabPages.RemoveAt(index);
+        _docs.RemoveAt(index);
+        if (_active >= _docs.Count) _active = _docs.Count - 1;
+        _switchingTabs = true;
+        _tabs.SelectedIndex = _active;
+        _switchingTabs = false;
+        LoadTab(_active);
+        UpdateTabHeaders();
+    }
+
+    /// <summary>Prompts for every unsaved tab. False => abort the action.</summary>
+    private bool ConfirmAllDiscarded()
+    {
+        var restore = _active;
+        for (var i = 0; i < _docs.Count; i++)
+        {
+            if (i != _active) ActivateTab(i);
+            if (!ConfirmDiscard())
+            {
+                // Aborted: put the user back where they were.
+                if (restore != _active) ActivateTab(restore);
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     // ---------------------------------------------------------------- editor / view
 
     private void OnEditorTextChanged(object? sender, EventArgs e)
@@ -674,7 +1036,33 @@ internal sealed class MainForm : Form
         _showEditor = visible;
         if (visible) PlaceSplitter();
         UpdateEditorVisibility(animated: true);
-        if (visible) _editor.Focus();
+        if (visible)
+        {
+            _editor.Focus();
+            // The preview may have been scrolled while hidden behind browse mode:
+            // pull its position into the editor instead of snapping it to the top.
+            SyncEditorFromPreview();
+        }
+    }
+
+    /// <summary>Preview viewport -> editor (used when the editor pane reappears).</summary>
+    private async void SyncEditorFromPreview()
+    {
+        try
+        {
+            var core = _preview.CoreWebView2;
+            if (core == null || !_previewReady || !_showEditor) return;
+            var json = await core.ExecuteScriptAsync("SLIMMD.scrollRatio()");
+            if (double.TryParse(json, NumberStyles.Float, CultureInfo.InvariantCulture, out var ratio))
+            {
+                _scrollSyncUntil = DateTime.UtcNow.AddMilliseconds(350);
+                ScrollEditorToRatio(ratio);
+            }
+        }
+        catch (Exception ex)
+        {
+            AppSettings.DebugLog("scroll sync failed: " + ex.Message);
+        }
     }
 
     private void UpdateEditorVisibility(bool animated)
@@ -689,6 +1077,7 @@ internal sealed class MainForm : Form
     {
         var name = DisplayName + (_dirty ? "*" : "");
         Text = $"{name} - {L.T("app.name")}";
+        UpdateTabHeaders();
     }
 
     private void UpdateStatus()
@@ -850,6 +1239,19 @@ internal sealed class MainForm : Form
                 {
                     RenderPreview();
                 }
+                else if (typeName == "scroll" && _showEditor && !_loading &&
+                         doc.RootElement.TryGetProperty("ratio", out var ratioEl) &&
+                         DateTime.UtcNow >= _scrollSyncUntil)
+                {
+                    // Preview viewport -> editor. Guarded by _scrollSyncUntil so the
+                    // echo of our own scrollToRatio() does not fight the user.
+                    if (double.TryParse(ratioEl.GetRawText(), NumberStyles.Float,
+                            CultureInfo.InvariantCulture, out var ratio))
+                    {
+                        _scrollSyncUntil = DateTime.UtcNow.AddMilliseconds(350);
+                        BeginInvoke(() => ScrollEditorToRatio(ratio));
+                    }
+                }
                 else if (typeName == "shortcut" && !_editor.Focused && IsHandleCreated &&
                          doc.RootElement.TryGetProperty("action", out var actionEl))
                 {
@@ -889,8 +1291,19 @@ internal sealed class MainForm : Form
         // so content is delivered through the script channel instead.
         var markdown = JsonSerializer.Serialize(_editor.Text);
         var reset = _renderReset ? "true" : "false";
+        var wasReset = _renderReset;
         _renderReset = false;
-        _ = core.ExecuteScriptAsync($"SLIMMD.apply({markdown},{reset});");
+        _ = core.ExecuteScriptAsync($"SLIMMD.apply({markdown},{reset});").ContinueWith(_ =>
+        {
+            // Content height may have changed: re-anchor the preview to the editor
+            // viewport so the line being edited stays visible.
+            if (!wasReset && IsHandleCreated)
+            {
+                _lastPushedRatio = -1;
+                try { BeginInvoke((Action)SyncScrollToPreview); }
+                catch (InvalidOperationException) { /* handle gone */ }
+            }
+        });
     }
 
     /// <summary>Opens http(s)/mailto links in the default browser and doc links in their app.</summary>
@@ -975,7 +1388,10 @@ internal sealed class MainForm : Form
     {
         if (e.Data?.GetData(DataFormats.FileDrop) is string[] { Length: > 0 } files)
         {
-            OpenFile(files[0]);
+            for (var i = 0; i < files.Length; i++)
+            {
+                OpenFile(files[i], newTab: i > 0 || !IsBlankUntitled());
+            }
         }
 
         base.OnDragDrop(e);

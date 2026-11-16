@@ -2,6 +2,35 @@
 
 All notable changes to SlimMD.
 
+## Unreleased
+
+### Scroll synchronisation
+- The editor and the preview now follow each other's scroll position in
+  both directions: scrolling the editor moves the preview, and scrolling
+  the preview (or re-showing the editor after browsing) moves the editor,
+  so the rendered result of what you are editing is always in view.
+
+### Multiple documents
+- Multiple Markdown files can be open at once — each gets its own tab
+  above the preview (the tab strip stays hidden while only one document
+  is open).
+- There is still a single editor pane; switching tabs switches it to that
+  document. Save / Save As / Export always act on the active tab.
+- Open dialog supports multi-select, drag & drop opens every dropped
+  file, and multiple files can be passed on the command line
+  (`SlimMD.exe a.md b.md`). Opening a file that is already open switches
+  to its tab instead of duplicating it.
+- Unsaved tabs are marked with `*` in the tab title and window title.
+
+### Unsaved-changes prompt
+- Closing a tab or the window while any document has unsaved edits asks
+  to save first (Yes / No / Cancel). Cancel keeps the tab/window open;
+  No discards. Every dirty tab is prompted when closing the window.
+
+### Verification
+- New tests: 11 multi-tab/close-prompt checks (`tools\tabs-test.ps1`),
+  4 scroll-sync checks (`tools\scroll-test.ps1`).
+
 ## 1.0.0 — 2026-11-12
 
 First release.
