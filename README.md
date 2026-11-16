@@ -24,6 +24,9 @@ instantly, and handles `.md` files with proper encoding (UTF-8 / Big5 / GBK).
   matching section (editing at `## 4.` shows `4.` in the preview), even though
   the two panes never have the same amount of content per screen.
 
+- **Toolbar with icons** — every toolbar action (New, Open, Save, Save As,
+  Export, Edit, Language, About) carries a small crisp icon next to its
+  label; the glyphs are drawn at runtime, so the app ships no image assets.
 - **Open / New / Save / Save As** — `Ctrl+O`, `Ctrl+N`, `Ctrl+S`, `Ctrl+Shift+S`.
   All shortcuts work in both browse and edit view. Drag & drop `.md` files
   onto the window to open them. Files can also be passed on the command line:
@@ -114,6 +117,7 @@ Useful flags: `-SkipIcon`, `-SkipTests`, `-SkipInstaller`.
 SlimMD.sln
 src\SlimMD\            WinForms app
   MainForm.cs          toolbar, split view, file I/O, PDF/HTML export, settings
+  ToolbarIcons.cs      GDI+-drawn toolbar glyphs (no image assets)
   AboutDialog.cs       About dialog
   AppInfo.cs           repository / license / copyright constants
   Strings.cs           EN/ZH UI strings

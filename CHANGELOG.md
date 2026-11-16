@@ -4,6 +4,12 @@ All notable changes to SlimMD.
 
 ## Unreleased
 
+### Interface
+- Every toolbar item (New, Open, Save, Save As, Export, Edit, Language,
+  About) now shows a small icon next to its label. The glyphs are drawn
+  with GDI+ at runtime (`ToolbarIcons.cs`) and scaled to the system DPI,
+  so no image assets are shipped and they stay crisp on high-DPI screens.
+
 ### Scroll synchronisation
 - Scroll sync is now **block-based** instead of proportional: the renderer
   tags every root-level block with the source line it came from, and each

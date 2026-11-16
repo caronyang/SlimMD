@@ -124,15 +124,21 @@ internal sealed class MainForm : Form
         _toolStrip.Padding = new Padding(6, 4, 6, 4);
         _toolStrip.BackColor = Color.FromArgb(246, 248, 250);
         _toolStrip.Font = Font;
+        _toolStrip.ImageScalingSize = new Size(ToolbarIcons.IconSize(), ToolbarIcons.IconSize());
 
-        _btnNew = NewButton("btnNew", "act.new", "tip.new");
-        _btnOpen = NewButton("btnOpen", "act.open", "tip.open");
-        _btnSave = NewButton("btnSave", "act.save", "tip.save");
-        _btnSaveAs = NewButton("btnSaveAs", "act.saveAs", "tip.saveAs");
-        _btnEdit = NewButton("btnEdit", "act.edit", "tip.edit");
-        _btnAbout = NewButton("btnAbout", "act.about", "tip.about");
+        _btnNew = NewButton("btnNew", "act.new", "tip.new", ToolbarIcons.New);
+        _btnOpen = NewButton("btnOpen", "act.open", "tip.open", ToolbarIcons.Open);
+        _btnSave = NewButton("btnSave", "act.save", "tip.save", ToolbarIcons.Save);
+        _btnSaveAs = NewButton("btnSaveAs", "act.saveAs", "tip.saveAs", ToolbarIcons.SaveAs);
+        _btnEdit = NewButton("btnEdit", "act.edit", "tip.edit", ToolbarIcons.Edit);
+        _btnAbout = NewButton("btnAbout", "act.about", "tip.about", ToolbarIcons.About);
 
-        _btnLanguage = new ToolStripDropDownButton { DisplayStyle = ToolStripItemDisplayStyle.Text, Name = "btnLanguage" };
+        _btnLanguage = new ToolStripDropDownButton
+        {
+            DisplayStyle = ToolStripItemDisplayStyle.ImageAndText,
+            Image = ToolbarIcons.Language(ToolbarIcons.IconSize()),
+            Name = "btnLanguage",
+        };
         _langEn = new ToolStripMenuItem("English") { Tag = "en", Name = "langEn" };
         _langZh = new ToolStripMenuItem("中文") { Tag = "zh", Name = "langZh" };
         _langEn.Click += (_, _) => SetLanguage(Lang.En);
@@ -140,7 +146,12 @@ internal sealed class MainForm : Form
         _btnLanguage.DropDownItems.Add(_langEn);
         _btnLanguage.DropDownItems.Add(_langZh);
 
-        _btnExport = new ToolStripDropDownButton { DisplayStyle = ToolStripItemDisplayStyle.Text, Name = "btnExport" };
+        _btnExport = new ToolStripDropDownButton
+        {
+            DisplayStyle = ToolStripItemDisplayStyle.ImageAndText,
+            Image = ToolbarIcons.Export(ToolbarIcons.IconSize()),
+            Name = "btnExport",
+        };
         _exportPdf = new ToolStripMenuItem { Name = "exportPdf" };
         _exportHtml = new ToolStripMenuItem { Name = "exportHtml" };
         _exportPdf.Click += async (_, _) => await ExportAsync(pdf: true);
@@ -270,13 +281,15 @@ internal sealed class MainForm : Form
         UpdateTabHeaders();
     }
 
-    private ToolStripButton NewButton(string name, string textKey, string tipKey)
+    private ToolStripButton NewButton(string name, string textKey, string tipKey,
+        Func<int, Bitmap> icon)
     {
         return new ToolStripButton
         {
             Name = name,
             Text = L.T(textKey),
-            DisplayStyle = ToolStripItemDisplayStyle.Text,
+            DisplayStyle = ToolStripItemDisplayStyle.ImageAndText,
+            Image = icon(ToolbarIcons.IconSize()),
             ToolTipText = L.T(tipKey),
             Padding = new Padding(6, 2, 6, 2),
         };

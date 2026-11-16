@@ -20,6 +20,8 @@
   渲染時記錄每個區塊的原始行號，任一區塊捲動時，另一邊會跳到對應的區塊
   （編輯停在 `## 4. 引用`，預覽就對到 `4. 引用`），兩邊資料量不成比例也
   照樣對齊。
+- **工具列圖示** — 每個工具列動作（新增、開啟、儲存、另存新檔、匯出、編輯、
+  語言、關於）標籤前都有小圖示；圖示以 GDI+ 即時繪製，不附帶任何圖檔。
 - **開啟 / 新建 / 儲存 / 另存新檔** — `Ctrl+O`、`Ctrl+N`、`Ctrl+S`、
   `Ctrl+Shift+S`，瀏覽與編輯模式皆可使用。也可將 `.md` 檔拖放至視窗開啟，
   或在命令列傳入檔案：`SlimMD.exe notes.md todo.md`。
@@ -102,6 +104,7 @@ powershell -ExecutionPolicy Bypass -File build.ps1
 SlimMD.sln
 src\SlimMD\            WinForms 應用程式
   MainForm.cs          工具列、分割檢視、檔案 I/O、PDF/HTML 匯出、設定
+  ToolbarIcons.cs      GDI+ 繪製的工具列圖示（無圖檔資源）
   AboutDialog.cs       關於對話框
   AppInfo.cs           儲存庫 / 授權 / 版權常數
   Strings.cs           中英文 UI 字串
