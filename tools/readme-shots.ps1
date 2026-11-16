@@ -41,6 +41,7 @@ public class RW {
     public static string Txt(IntPtr h) { var sb = new StringBuilder(512); GetWindowText(h, sb, 512); return sb.ToString(); }
     public static readonly IntPtr TOPMOST = new IntPtr(-1);
     public static readonly IntPtr NOTOPMOST = new IntPtr(-2);
+    [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr hdc, uint flags);
     [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
 }
 "@
@@ -154,12 +155,17 @@ function Shot-Window([string]$file) {
     $r = New-Object RW+RECT
     [void][RW]::GetWindowRect($h, [ref]$r)
     $w = $r.Right - $r.Left; $ht = $r.Bottom - $r.Top
-    Suppress-Overlap $r.Left $r.Top $w $ht
+    # PrintWindow requests the pixels from the window itself. CopyFromScreen
+    # kept grabbing a stale/occluded frame (UIA said split view but the shot
+    # showed browse mode), so use the window's own rendering instead.
     $bmp = New-Object System.Drawing.Bitmap($w, $ht)
     $g = [System.Drawing.Graphics]::FromImage($bmp)
-    $g.CopyFromScreen($r.Left, $r.Top, 0, 0, $bmp.Size)
+    $hdc = $g.GetHdc()
+    [void][RW]::PrintWindow($h, $hdc, 2)   # PW_RENDERFULLCONTENT
+    $g.ReleaseHdc($hdc)
+    $g.Dispose()
     $bmp.Save($file, [System.Drawing.Imaging.ImageFormat]::Png)
-    $g.Dispose(); $bmp.Dispose()
+    $bmp.Dispose()
     Restore-Overlap
     Write-Output "-> $file ($w x $ht)"
 }
@@ -285,7 +291,17 @@ $script:suppressed = @()
 Shot-Window (Join-Path $root "art\readme_browse_en.png")
 
 # 2) EN split view (Edit -> Hide Editor)
-Invoke-Button 5 $null
+# The UIA element can go stale after the previous shot's window suppression /
+# restore, which makes Invoke fail silently - verify the label and retry.
+$splitLabel = "Hide Editor"
+for ($try = 0; $try -lt 3; $try++) {
+    try { Invoke-Button 5 $splitLabel; break }
+    catch {
+        if ($try -eq 2) { throw }
+        Write-Output "Edit toggle failed (attempt $($try + 1)), retrying..."
+        Start-Sleep -Milliseconds 800
+    }
+}
 Shot-Window (Join-Path $root "art\readme_split_en.png")
 
 # 3) EN About
@@ -307,7 +323,14 @@ Start-Sleep -Milliseconds 1300
 # Edit button (index 5) now reads 隱藏編輯區 - click it to return to browse view,
 # after which the label is back to 編輯.
 $browseLabel = "$([char]0x7DE8)$([char]0x8F2F)"
-Invoke-Button 5 $browseLabel
+for ($try = 0; $try -lt 3; $try++) {
+    try { Invoke-Button 5 $browseLabel; break }
+    catch {
+        if ($try -eq 2) { throw }
+        Write-Output "Hide Editor toggle failed (attempt $($try + 1)), retrying..."
+        Start-Sleep -Milliseconds 800
+    }
+}
 # The toolbar button keeps the focus rectangle - click preview whitespace so the
 # screenshot shows a clean toolbar.
 $r = New-Object RW+RECT

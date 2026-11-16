@@ -59,7 +59,7 @@
 
 ## 安裝
 
-執行 `dist\SlimMD-1.0.0-Setup.exe` — 僅安裝給目前使用者（不需要系統管理員
+執行 `dist\SlimMD-1.0.1-Setup.exe` — 僅安裝給目前使用者（不需要系統管理員
 權限），預設安裝至 `%LOCALAPPDATA%\Programs\SlimMD`。
 
 安裝程式提供選用項目：桌面捷徑、`.md` 檔關聯。
@@ -69,7 +69,7 @@
 ### 靜默安裝
 
 ```
-SlimMD-1.0.0-Setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+SlimMD-1.0.1-Setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
 ```
 
 ## 從原始碼建置

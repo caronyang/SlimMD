@@ -2,7 +2,9 @@
 
 All notable changes to SlimMD.
 
-## Unreleased
+## 1.0.1 — 2026-11-16
+
+Second release: user-feedback round, block-based scroll sync and toolbar icons.
 
 ### Interface
 - Every toolbar item (New, Open, Save, Save As, Export, Edit, Language,
@@ -12,10 +14,6 @@ All notable changes to SlimMD.
 - All glyphs share the same 13x13 footprint inside the 16x16 grid so the
   row reads uniformly; Save As uses two overlapping floppies rather than
   a pencil overlay, which looked lopsided at 16px.
-- `tools\tabs-test.ps1` now re-resolves the main-window handle through a
-  live UIA check — `Start-Process -PassThru` can hand back a stale handle
-  after the window is recreated during startup, which made every UIA
-  lookup silently return nothing.
 
 ### Scroll synchronisation
 - Scroll sync is now **block-based** instead of proportional: the renderer
@@ -58,6 +56,10 @@ All notable changes to SlimMD.
 - New tests: 15 multi-tab/close-prompt/✕ checks (`tools\tabs-test.ps1`),
   4 scroll-sync checks (`tools\scroll-test.ps1`), 6 block-alignment checks
   (`tools\blocksync-test.ps1`).
+- `tools\tabs-test.ps1` now re-resolves the main-window handle through a
+  live UIA check — `Start-Process -PassThru` can hand back a stale handle
+  after the window is recreated during startup, which made every UIA
+  lookup silently return nothing.
 
 ## 1.0.0 — 2026-11-12
 

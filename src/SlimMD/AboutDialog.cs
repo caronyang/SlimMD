@@ -150,7 +150,7 @@ internal sealed class AboutDialog : Form
         var raw = (Application.ProductVersion ?? "").Split('+')[0].Trim();
         var parts = raw.Split('.');
         if (parts.Length >= 3) return $"{parts[0]}.{parts[1]}.{parts[2]}";
-        return string.IsNullOrEmpty(raw) ? "1.0.0" : raw;
+        return string.IsNullOrEmpty(raw) ? "1.0.1" : raw;
     }
 
     private static void AddBody(TableLayoutPanel layout, int row, string text, bool bold = false)
