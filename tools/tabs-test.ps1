@@ -55,6 +55,30 @@ function Get-MainH {
     return [IntPtr]::Zero
 }
 
+# Start-Process -PassThru can hand back a stale MainWindowHandle (the window
+# may be recreated during startup), so re-resolve it from a fresh process
+# enumeration and only accept it once UIA confirms it exposes our toolbar.
+function Resolve-MainH([IntPtr]$fallback, [int]$attempts = 12) {
+    for ($i = 0; $i -lt $attempts; $i++) {
+        foreach ($h in @($fallback, (Get-MainH))) {
+            if ($h -eq [IntPtr]::Zero) { continue }
+            try {
+                $win = [System.Windows.Automation.AutomationElement]::FromHandle($h)
+                $cond = New-Object System.Windows.Automation.PropertyCondition(
+                    [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+                    [System.Windows.Automation.ControlType]::ToolBar)
+                if ($win.FindFirst([System.Windows.Automation.TreeScope]::Subtree, $cond)) {
+                    $script:mainH = $h
+                    return $h
+                }
+            } catch { /* wrong handle - keep trying */ }
+        }
+        Start-Sleep -Milliseconds 800
+        $fallback = [IntPtr]::Zero
+    }
+    return [IntPtr]::Zero
+}
+
 function Get-Win {
     $h = Get-MainH
     if (-not $h) { return $null }
@@ -204,7 +228,10 @@ Remove-Item "$env:LOCALAPPDATA\SlimMD\settings.json" -ErrorAction SilentlyContin
 $p = Start-Process (Join-Path $root $Exe) -ArgumentList "`"$f1`"", "`"$f2`"" -PassThru
 Start-Sleep -Seconds 6
 if ($p.HasExited) { Report "app starts with two files" $false "exited early"; exit 1 }
-$script:mainH = $p.MainWindowHandle
+# The PassThru handle can be stale; re-resolve against a live UIA tree.
+$p.Refresh()
+$script:mainH = Resolve-MainH $p.MainWindowHandle
+if ($script:mainH -eq [IntPtr]::Zero) { Report "app starts with two files" $false "no UIA window"; exit 1 }
 Report "app starts with two files" $true
 
 # --- 1. tab strip shows both documents ---

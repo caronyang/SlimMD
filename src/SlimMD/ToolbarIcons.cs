@@ -39,13 +39,13 @@ internal static class ToolbarIcons
         var page = new GraphicsPath();
         page.AddPolygon(new[]
         {
-            new PointF(3f, 1.5f), new PointF(9.5f, 1.5f), new PointF(12.5f, 4.5f),
-            new PointF(12.5f, 14.5f), new PointF(3f, 14.5f),
+            new PointF(2.5f, 1.5f), new PointF(9.9f, 1.5f), new PointF(13.5f, 5.1f),
+            new PointF(13.5f, 14.5f), new PointF(2.5f, 14.5f),
         });
         FillStroke(g, page);
         g.DrawPath(Pen(1f), new GraphicsPath(new[]
         {
-            new PointF(9.5f, 1.5f), new PointF(9.5f, 4.5f), new PointF(12.5f, 4.5f),
+            new PointF(9.9f, 1.5f), new PointF(9.9f, 5.1f), new PointF(13.5f, 5.1f),
         }, new byte[] { 0, 1, 1 }));
     });
 
@@ -55,16 +55,16 @@ internal static class ToolbarIcons
         var back = new GraphicsPath();
         back.AddPolygon(new[]
         {
-            new PointF(1.5f, 3.5f), new PointF(6f, 3.5f), new PointF(7.4f, 5.4f),
-            new PointF(14.5f, 5.4f), new PointF(14.5f, 8f), new PointF(1.5f, 8f),
+            new PointF(1.5f, 2.8f), new PointF(6f, 2.8f), new PointF(7.4f, 4.8f),
+            new PointF(14.5f, 4.8f), new PointF(14.5f, 7.6f), new PointF(1.5f, 7.6f),
         });
         FillStroke(g, back);
 
         var front = new GraphicsPath();
         front.AddPolygon(new[]
         {
-            new PointF(1.5f, 6.8f), new PointF(14.5f, 6.8f),
-            new PointF(14.5f, 13.5f), new PointF(1.5f, 13.5f),
+            new PointF(1.5f, 6.4f), new PointF(14.5f, 6.4f),
+            new PointF(14.5f, 14f), new PointF(1.5f, 14f),
         });
         FillStroke(g, front);
     });
@@ -72,14 +72,36 @@ internal static class ToolbarIcons
     /// <summary>Save: a floppy disk.</summary>
     public static Bitmap Save(int size) => Render(size, Floppy);
 
-    /// <summary>Save As: a smaller floppy with a pencil over its corner.</summary>
+    /// <summary>Save As: two overlapping floppies (save a copy / new name) —
+    /// fills the grid diagonally so it matches the visual weight of the rest.</summary>
     public static Bitmap SaveAs(int size) => Render(size, g =>
     {
-        g.TranslateTransform(0.4f, 0.4f);
-        g.ScaleTransform(0.72f, 0.72f);
-        Floppy(g);
-        g.ResetTransform();
-        Pencil(g, new PointF(7.4f, 15.2f), new PointF(15.3f, 7.3f), 1.4f, 2.6f);
+        // Back disk (top left): solid, with its shutter showing above the front disk.
+        using (var back = RoundRect(1.5f, 1.5f, 9.6f, 9.6f, 1.2f))
+        {
+            using var ink = new SolidBrush(Ink);
+            g.FillPath(ink, back);
+        }
+        using (var paper = new SolidBrush(Paper))
+        {
+            g.FillRectangle(paper, 7.3f, 1.5f, 2.1f, 2.8f);
+        }
+
+        // Front disk (bottom right): white ring first to carve it out of the back one.
+        using (var ring = RoundRect(5.4f, 5.4f, 9.1f, 9.1f, 1.1f))
+        {
+            using var gap = new Pen(Paper, 1.6f);
+            g.DrawPath(gap, ring);
+        }
+        using (var front = RoundRect(5.4f, 5.4f, 9.1f, 9.1f, 1.1f))
+        {
+            using var ink = new SolidBrush(Ink);
+            g.FillPath(ink, front);
+            using var paper = new SolidBrush(Paper);
+            g.FillRectangle(paper, 10.7f, 5.4f, 2.2f, 3f);    // shutter
+            g.FillRectangle(ink, 11.9f, 5.4f, 1f, 2f);         // slider notch
+            g.FillRectangle(paper, 7.25f, 10.5f, 5.4f, 3.1f);  // label
+        }
     });
 
     /// <summary>Export: an upload tray with an arrow leaving it.</summary>

@@ -9,6 +9,13 @@ All notable changes to SlimMD.
   About) now shows a small icon next to its label. The glyphs are drawn
   with GDI+ at runtime (`ToolbarIcons.cs`) and scaled to the system DPI,
   so no image assets are shipped and they stay crisp on high-DPI screens.
+- All glyphs share the same 13x13 footprint inside the 16x16 grid so the
+  row reads uniformly; Save As uses two overlapping floppies rather than
+  a pencil overlay, which looked lopsided at 16px.
+- `tools\tabs-test.ps1` now re-resolves the main-window handle through a
+  live UIA check — `Start-Process -PassThru` can hand back a stale handle
+  after the window is recreated during startup, which made every UIA
+  lookup silently return nothing.
 
 ### Scroll synchronisation
 - Scroll sync is now **block-based** instead of proportional: the renderer
