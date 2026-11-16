@@ -71,7 +71,7 @@ instantly, and handles `.md` files with proper encoding (UTF-8 / Big5 / GBK).
 
 ## Install
 
-Run `dist\SlimMD-1.0.1-Setup.exe` — a per-user install (no admin rights
+Run `dist\SlimMD-1.0.2-Setup.exe` — a per-user install (no admin rights
 required), to `%LOCALAPPDATA%\Programs\SlimMD`.
 
 Optional tasks in the installer: desktop shortcut, `.md` file association.
@@ -82,7 +82,7 @@ folder.
 ### Silent install
 
 ```
-SlimMD-1.0.1-Setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+SlimMD-1.0.2-Setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
 ```
 
 ## Build from source

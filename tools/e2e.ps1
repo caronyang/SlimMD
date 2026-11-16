@@ -524,7 +524,7 @@ if ($btnsX.Count -ge 7) {
 }
 
 # --- About dialog (button index 7) ---
-Check-About "About SlimMD" (Join-Path $root "art\e2e_about_en.png") @("1.0.1", "Caron Yang", "Export to PDF", "GitHub Repository")
+Check-About "About SlimMD" (Join-Path $root "art\e2e_about_en.png") @("1.0.2", "Caron Yang", "Export to PDF", "GitHub Repository")
 
 # --- switch language to Chinese (button index 6) ---
 $btns3 = Get-ToolbarButtons
@@ -575,7 +575,7 @@ if ($btns5.Count -ge 7) {
 }
 
 # --- About dialog localised ---
-Check-About $zhAbout (Join-Path $root "art\e2e_about_zh.png") @("1.0.1", "Caron Yang", $zhVersion, $zhFeatures)
+Check-About $zhAbout (Join-Path $root "art\e2e_about_zh.png") @("1.0.2", "Caron Yang", $zhVersion, $zhFeatures)
 
 # --- settings persisted ---
 $settingsPath = "$env:LOCALAPPDATA\SlimMD\settings.json"

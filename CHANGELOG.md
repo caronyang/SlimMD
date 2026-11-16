@@ -2,6 +2,21 @@
 
 All notable changes to SlimMD.
 
+## Unreleased
+
+### Scroll synchronisation
+- Reaching the end of the document now reaches the end of the preview. Block
+  alignment alone left the preview short of the bottom (the last few blocks are
+  shorter than the viewport), so both panes now snap to the very end, in both
+  directions: scrolling the editor to its last line scrolls the preview to the
+  bottom, and scrolling the preview to the bottom scrolls the editor to its
+  last page.
+- Positions inside a block are interpolated by source-line count instead of
+  snapping to the block start, so mid-paragraph scrolling moves smoothly.
+- The echo guard is now position-based (the host records the offset it scrolled
+  to and ignores exactly that one scroll event) instead of a timed flag, which
+  could swallow continuous wheel scrolling.
+
 ## 1.0.1 — 2026-11-16
 
 Second release: user-feedback round, block-based scroll sync and toolbar icons.

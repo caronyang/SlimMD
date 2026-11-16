@@ -455,6 +455,7 @@ internal sealed class MainForm : Form
                 _editor.SelectionStart = 0;
                 _renderReset = true;
                 _lastPushedLine = -1;
+                _lastPushedAtBottom = false;
                 UpdateDocRoot();
                 UpdateTitle();
                 UpdateStatus();
@@ -730,6 +731,7 @@ internal sealed class MainForm : Form
     private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
 
     private const int EmGetFirstVisibleLine = 0x00CE;
+    private const int EmGetLineCount = 0x00BA;
     private const int EmLineScroll = 0x00B6;
 
     /// <summary>Multiline TextBox that reports WM_VSCROLL / WM_MOUSEWHEEL / WM_HSCROLL.</summary>
@@ -762,6 +764,28 @@ internal sealed class MainForm : Form
         var first = EditorFirstLine();
         var delta = line - first;
         if (delta == 0) return;
+        SyncEditorScroll(delta);
+        // Remember where we just put the editor: the Scrolled event this causes
+        // must not push the preview back (that would undo the user's scroll).
+        _lastPushedLine = EditorFirstLine();
+        _lastPushedAtBottom = false;
+    }
+
+    /// <summary>Scrolls the editor to its last page (used when the preview hits the bottom).</summary>
+    private void ScrollEditorToEnd()
+    {
+        if (!_showEditor || !_editor.IsHandleCreated) return;
+        var count = SendMessage(_editor.Handle, EmGetLineCount, IntPtr.Zero, IntPtr.Zero).ToInt32();
+        var visible = EditorVisibleLines();
+        var target = Math.Max(0, count - visible);
+        var delta = target - EditorFirstLine();
+        if (delta != 0) SyncEditorScroll(delta);
+        _lastPushedLine = EditorFirstLine();
+        _lastPushedAtBottom = true;
+    }
+
+    private void SyncEditorScroll(int delta)
+    {
         _syncingScroll = true;
         try
         {
@@ -773,6 +797,22 @@ internal sealed class MainForm : Form
         }
     }
 
+    /// <summary>Number of editor lines that fit in the visible height.</summary>
+    private int EditorVisibleLines()
+    {
+        var lineHeight = Math.Max(1, _editor.Font.Height);
+        return Math.Max(1, _editor.ClientSize.Height / lineHeight);
+    }
+
+    /// <summary>True when the editor has no further lines to scroll to.</summary>
+    private bool EditorAtBottom()
+    {
+        if (!_editor.IsHandleCreated) return false;
+        var count = SendMessage(_editor.Handle, EmGetLineCount, IntPtr.Zero, IntPtr.Zero).ToInt32();
+        var maxFirst = Math.Max(0, count - EditorVisibleLines());
+        return EditorFirstLine() >= maxFirst;
+    }
+
     /// <summary>Editor viewport -> preview (the "see my edit immediately" direction).
     /// Scrolls the preview to the block the editor's top line belongs to.</summary>
     private void SyncScrollToPreview()
@@ -781,6 +821,18 @@ internal sealed class MainForm : Form
         var core = _preview.CoreWebView2;
         if (core == null || !_previewReady) return;
 
+        // Reaching the end of the document must reach the end of the preview,
+        // otherwise a few tall blocks would leave the preview mid-page.
+        if (EditorAtBottom())
+        {
+            if (_lastPushedAtBottom) return;
+            _lastPushedAtBottom = true;
+            _lastPushedLine = -1;
+            _ = core.ExecuteScriptAsync("SLIMMD.scrollToBottom();");
+            return;
+        }
+        _lastPushedAtBottom = false;
+
         var line = EditorFirstLine();
         if (line == _lastPushedLine) return;
         _lastPushedLine = line;
@@ -788,6 +840,7 @@ internal sealed class MainForm : Form
     }
 
     private int _lastPushedLine = -1;
+    private bool _lastPushedAtBottom;
 
     // ---------------------------------------------------------------- tabs
 
@@ -931,6 +984,7 @@ internal sealed class MainForm : Form
         _editor.SelectionLength = 0;
         _renderReset = false;
         _lastPushedLine = -1;
+        _lastPushedAtBottom = false;
         UpdateDocRoot();
         UpdateTitle();
         UpdateStatus();
@@ -1019,6 +1073,7 @@ internal sealed class MainForm : Form
             _editor.SelectionStart = 0;
             _renderReset = true;
             _lastPushedLine = -1;
+            _lastPushedAtBottom = false;
             StashActive();
             UpdateDocRoot();
             UpdateTitle();
@@ -1139,8 +1194,21 @@ internal sealed class MainForm : Form
         {
             var core = _preview.CoreWebView2;
             if (core == null || !_previewReady || !_showEditor) return;
-            var json = await core.ExecuteScriptAsync("SLIMMD.topLine()");
-            if (int.TryParse(json, NumberStyles.Integer, CultureInfo.InvariantCulture, out var line))
+            var json = await core.ExecuteScriptAsync(
+                "JSON.stringify({line: SLIMMD.topLine(), bottom: SLIMMD.atBottom()})");
+            if (string.IsNullOrEmpty(json)) return;
+            var text = JsonSerializer.Deserialize<string>(json);
+            if (string.IsNullOrEmpty(text)) return;
+            using var doc = JsonDocument.Parse(text);
+            var bottom = doc.RootElement.TryGetProperty("bottom", out var b) &&
+                         b.ValueKind == JsonValueKind.True;
+            if (bottom)
+            {
+                ScrollEditorToEnd();
+                return;
+            }
+            if (doc.RootElement.TryGetProperty("line", out var l) &&
+                l.TryGetInt32(out var line))
             {
                 ScrollEditorToLine(line);
             }
@@ -1328,12 +1396,19 @@ internal sealed class MainForm : Form
                 else if (typeName == "scroll" && _showEditor && !_loading &&
                          doc.RootElement.TryGetProperty("line", out var lineEl))
                 {
-                    // Preview viewport -> editor: move the editor to the source
-                    // line of the block at the top of the preview. Our own
-                    // scrollToLine() echo is swallowed by the JS `syncing` flag,
-                    // so no time-based guard is needed here.
-                    if (lineEl.TryGetInt32(out var line))
+                    // Preview viewport -> editor: moving the preview to its very
+                    // end must move the editor to its very end too, otherwise the
+                    // remaining blocks would leave the editor short of the bottom.
+                    var atBottom = doc.RootElement.TryGetProperty("atBottom", out var bottomEl) &&
+                                   bottomEl.ValueKind == JsonValueKind.True;
+                    if (atBottom)
                     {
+                        BeginInvoke((Action)ScrollEditorToEnd);
+                    }
+                    else if (lineEl.TryGetInt32(out var line))
+                    {
+                        // Our own scrollToLine() echo is swallowed by the JS
+                        // `syncing` flag, so no time-based guard is needed here.
                         BeginInvoke(() => ScrollEditorToLine(line));
                     }
                 }
@@ -1385,6 +1460,7 @@ internal sealed class MainForm : Form
             if (!wasReset && IsHandleCreated)
             {
                 _lastPushedLine = -1;
+                _lastPushedAtBottom = false;
                 try { BeginInvoke((Action)SyncScrollToPreview); }
                 catch (InvalidOperationException) { /* handle gone */ }
             }

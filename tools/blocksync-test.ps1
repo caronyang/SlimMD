@@ -156,6 +156,45 @@ function Assert-Alignment([string]$label) {
     Report $label $ok "editor=$e preview=$p"
 }
 
+# True when the preview's last block (the end marker) is inside the viewport.
+function Get-PreviewEndVisible {
+    $win = Get-Win
+    $r = New-Object B1+RECT
+    [B1]::GetWindowRect($script:mainH, [ref]$r) | Out-Null
+    $cond = [System.Windows.Automation.Condition]::TrueCondition
+    $all = $win.FindAll([System.Windows.Automation.TreeScope]::Subtree, $cond)
+    foreach ($e in $all) {
+        $n = $e.Current.Name
+        if (-not $n) { continue }
+        if ($n -notmatch 'END-OF-DOCUMENT-MARKER') { continue }
+        $rect = $e.Current.BoundingRectangle
+        if ($rect.Height -le 0) { continue }
+        if ($rect.X -lt $r.Left + [int](($r.Right - $r.Left) * 0.45)) { continue }
+        # Inside the window (above the status bar) => it is on screen.
+        if ($rect.Y -gt $r.Top + 40 -and $rect.Y -lt $r.Bottom - 40) { return $true }
+    }
+    return $false
+}
+
+# True when the editor's visible text contains the end marker.
+function Get-EditorEndVisible {
+    $text = Get-EditorTopText
+    if ($null -eq $text) { return $false }
+    $ed = Get-Editor
+    $tp = $null
+    if ($ed -and $ed.TryGetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern, [ref]$tp)) {
+        $vis = $tp.GetVisibleRanges()
+        if ($vis.Length -gt 0) { $text = $vis[0].GetText(8000) }
+    }
+    return ($text -like '*END-OF-DOCUMENT-MARKER*')
+}
+
+function Assert-AtEnd([string]$label) {
+    $p = Get-PreviewEndVisible
+    $e = Get-EditorEndVisible
+    Report $label ($p -and $e) "previewEnd=$p editorEnd=$e"
+}
+
 # ---------------------------------------------------------------- scenario
 
 $file = Join-Path $root "testdata\scroll_sync.md"
@@ -213,13 +252,26 @@ if ($ed -and $ed.TryGetCurrentPattern([System.Windows.Automation.TextPattern]::P
 Start-Sleep -Milliseconds 300
 [System.Windows.Forms.SendKeys]::SendWait("^({END})")
 Start-Sleep -Milliseconds 2000
-Assert-Alignment "aligned after editor Ctrl+End"
+Assert-AtEnd "both panes reach the end after editor Ctrl+End"
 
 # --- back to the top ---
 Raise
 [System.Windows.Forms.SendKeys]::SendWait("^({HOME})")
 Start-Sleep -Milliseconds 2000
 Assert-Alignment "aligned after editor Ctrl+Home"
+
+# --- preview driven to its end must drag the editor to its end ---
+Raise
+$r = New-Object B1+RECT
+[B1]::GetWindowRect($script:mainH, [ref]$r) | Out-Null
+$w = $r.Right - $r.Left; $ht = $r.Bottom - $r.Top
+$x = $r.Left + [int]($w * 0.75); $y = $r.Top + [int]($ht * 0.5)
+[System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point($x, $y)
+Start-Sleep -Milliseconds 300
+$wd = [uint32]4294967056
+for ($i = 0; $i -lt 200; $i++) { [B1]::mouse_event(0x0800, 0, 0, $wd, 0); Start-Sleep -Milliseconds 15 }
+Start-Sleep -Milliseconds 2000
+Assert-AtEnd "both panes reach the end after preview wheel to bottom"
 
 [B1]::SetWindowPos($script:mainH, [B1]::NOTOPMOST, 0, 0, 0, 0, 0x1 -bor 0x40) | Out-Null
 if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }

@@ -726,13 +726,26 @@ if (typeof window !== 'undefined' && window.addEventListener) {
   // editor (and vice versa). Throttled to one message per animation frame.
   var scrollPending = false;
   window.addEventListener('scroll', function () {
-    if (syncing || scrollPending) return;
+    if (scrollPending) return;
+    // Swallow exactly the echo of a scroll the host just asked for; a real
+    // user scroll lands somewhere else and is always reported (a timed flag
+    // used to drop continuous wheel events).
+    var y = window.pageYOffset || 0;
+    if (expectY >= 0) {
+      var hit = Date.now() <= expectUntil && Math.abs(y - expectY) < 2;
+      expectY = -1;
+      if (hit) return;
+    }
     if (!window.chrome || !window.chrome.webview) return;
     scrollPending = true;
     window.requestAnimationFrame(function () {
       scrollPending = false;
       try {
-        window.chrome.webview.postMessage({ type: 'scroll', line: SLIMMD.topLine() });
+        window.chrome.webview.postMessage({
+          type: 'scroll',
+          line: SLIMMD.topLine(),
+          atBottom: SLIMMD.atBottom()
+        });
       } catch (err) { /* host gone */ }
     });
   }, { passive: true });
@@ -743,8 +756,17 @@ if (typeof window !== 'undefined' && window.addEventListener) {
   }
 }
 
-/** Set while the host is driving the preview scroll, to swallow the echo. */
-var syncing = false;
+/** Position the host just scrolled us to, and how long the echo may arrive. */
+var expectY = -1;
+var expectUntil = 0;
+
+/** Scroll to `y` and mark it so the resulting scroll event is not echoed back. */
+function hostScrollTo(y) {
+  if (Math.abs((window.pageYOffset || 0) - y) < 1) return;
+  expectY = y;
+  expectUntil = Date.now() + 400;
+  window.scrollTo(0, y);
+}
 
 /**
  * Turn the `<!--l:N-->` markers emitted by the renderer into data-line
@@ -791,24 +813,54 @@ SLIMMD.topLine = function () {
   return best;
 };
 
+/** True when the preview cannot scroll any further down. */
+SLIMMD.atBottom = function () {
+  var max = document.documentElement.scrollHeight - window.innerHeight;
+  return max > 0 && (window.pageYOffset || 0) >= max - 1;
+};
+
+/** Scroll the preview all the way to the end (editor is at its last line). */
+SLIMMD.scrollToBottom = function () {
+  var max = document.documentElement.scrollHeight - window.innerHeight;
+  if (max <= 0) return;
+  hostScrollTo(max);
+};
+
 /**
- * Scroll the preview so the block that starts at or before `line` sits at the
- * top of the viewport. This maps editor lines onto their rendered blocks, so
- * the two panes stay aligned even though their content is not proportional.
+ * Scroll the preview so the editor line `line` is visible at the top.
+ * Block-aligned: the block whose `data-line` is the last one at or before
+ * `line` provides the anchor. Inside a block, the position is interpolated
+ * towards the next block by the number of source lines, so mid-block edits
+ * move smoothly instead of snapping to the block start.
  */
 SLIMMD.scrollToLine = function (line) {
   var els = document.querySelectorAll('[data-line]');
+  if (!els.length) return;
   var target = null;
+  var next = null;
   for (var i = 0; i < els.length; i++) {
     var l = parseInt(els[i].getAttribute('data-line'), 10);
     if (l <= line) target = els[i];
-    else break;
+    else { next = els[i]; break; }
   }
   var y = 0;
-  if (target) y = target.getBoundingClientRect().top + (window.pageYOffset || 0);
+  if (target) {
+    var offset = window.pageYOffset || 0;
+    var y0 = target.getBoundingClientRect().top + offset;
+    y = y0;
+    if (next) {
+      var l0 = parseInt(target.getAttribute('data-line'), 10);
+      var l1 = parseInt(next.getAttribute('data-line'), 10);
+      if (l1 > l0 && line > l0) {
+        var y1 = next.getBoundingClientRect().top + offset;
+        y = y0 + (y1 - y0) * ((line - l0) / (l1 - l0));
+      }
+    } else {
+      // Last block: the remaining source lines have nowhere left to render,
+      // so sit at the very end.
+      y = document.documentElement.scrollHeight - window.innerHeight;
+    }
+  }
   if (Math.abs((window.pageYOffset || 0) - y) < 1) return;
-  // Suppress the scroll event this generates so it does not echo back.
-  syncing = true;
-  window.scrollTo(0, y);
-  window.setTimeout(function () { syncing = false; }, 120);
+  hostScrollTo(y);
 };

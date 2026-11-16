@@ -1,8 +1,8 @@
-# Smoke-tests the shipped installer: silent install -> launch -> verify Export
+﻿# Smoke-tests the shipped installer: silent install -> launch -> verify Export
 # menu exists in the installed app -> silent uninstall.
 $ErrorActionPreference = "Continue"
 $root = 'D:\caron\99_temp\opencode\SlimMD'
-$setup = Join-Path $root 'dist\SlimMD-1.0.1-Setup.exe'
+$setup = Join-Path $root 'dist\SlimMD-1.0.2-Setup.exe'
 $installDir = Join-Path $env:LOCALAPPDATA 'Programs\SlimMD'
 $exe = Join-Path $installDir 'SlimMD.exe'
 

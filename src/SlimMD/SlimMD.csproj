@@ -10,7 +10,7 @@
     <AssemblyName>SlimMD</AssemblyName>
     <ApplicationIcon>SlimMD.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>1.0.1</Version>
+    <Version>1.0.2</Version>
     <Product>SlimMD</Product>
     <AssemblyTitle>SlimMD</AssemblyTitle>
     <AssemblyDescription>SlimMD - Lightweight Markdown editor and viewer</AssemblyDescription>
