@@ -5,7 +5,7 @@
 ; ---------------------------------------------------------------------------
 
 #define MyAppName "SlimMD"
-#define MyAppVersion "1.0.2"
+#define MyAppVersion "1.0.3"
 #define MyAppPublisher "SlimMD Project"
 #define MyAppExeName "SlimMD.exe"
 #define MyProgId "SlimMD.md"

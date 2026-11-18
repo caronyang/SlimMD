@@ -27,6 +27,11 @@ instantly, and handles `.md` files with proper encoding (UTF-8 / Big5 / GBK).
 - **Toolbar with icons** — every toolbar action (New, Open, Save, Save As,
   Export, Edit, Language, About) carries a small crisp icon next to its
   label; the glyphs are drawn at runtime, so the app ships no image assets.
+- **Fast opening with a loading indicator** — the preview engine starts while
+  the window is being built and documents are read immediately, so files open
+  noticeably faster. While a document is being prepared, the status bar shows
+  a `Loading <file>...` message with a progress bar and the same message is
+  shown in the preview pane.
 - **Open / New / Save / Save As** — `Ctrl+O`, `Ctrl+N`, `Ctrl+S`, `Ctrl+Shift+S`.
   All shortcuts work in both browse and edit view. Drag & drop `.md` files
   onto the window to open them. Files can also be passed on the command line:
@@ -71,7 +76,7 @@ instantly, and handles `.md` files with proper encoding (UTF-8 / Big5 / GBK).
 
 ## Install
 
-Run `dist\SlimMD-1.0.2-Setup.exe` — a per-user install (no admin rights
+Run `dist\SlimMD-1.0.3-Setup.exe` — a per-user install (no admin rights
 required), to `%LOCALAPPDATA%\Programs\SlimMD`.
 
 Optional tasks in the installer: desktop shortcut, `.md` file association.
@@ -82,7 +87,7 @@ folder.
 ### Silent install
 
 ```
-SlimMD-1.0.2-Setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+SlimMD-1.0.3-Setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
 ```
 
 ## Build from source
@@ -108,7 +113,8 @@ Useful flags: `-SkipIcon`, `-SkipTests`, `-SkipInstaller`.
 | `powershell -File tools\export-test.ps1` | Export flow (menu → Save dialog → PDF/HTML on disk) — 17 checks |
 | `powershell -File tools\tabs-test.ps1` | Multi-tab documents + unsaved-close prompt + tab ✕ close button — 15 checks |
 | `powershell -File tools\scroll-test.ps1` | Editor ↔ preview scroll synchronisation (both directions) — 4 checks |
-| `powershell -File tools\blocksync-test.ps1` | Block-based scroll sync: editor top line ↔ preview top section stay aligned — 6 checks |
+| `powershell -File tools\blocksync-test.ps1` | Block-based scroll sync: editor top line ↔ preview top section stay aligned — 7 checks |
+| `powershell -File tools\loading-test.ps1` | Loading state (status bar + preview pane, English and Chinese) — 9 checks |
 | `powershell -File tools\installer-test.ps1` | Shipped installer: silent install → run → Export menu → uninstall — 6 checks |
 
 ## Project layout

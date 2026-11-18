@@ -2,7 +2,7 @@
 # menu exists in the installed app -> silent uninstall.
 $ErrorActionPreference = "Continue"
 $root = 'D:\caron\99_temp\opencode\SlimMD'
-$setup = Join-Path $root 'dist\SlimMD-1.0.2-Setup.exe'
+$setup = Join-Path $root 'dist\SlimMD-1.0.3-Setup.exe'
 $installDir = Join-Path $env:LOCALAPPDATA 'Programs\SlimMD'
 $exe = Join-Path $installDir 'SlimMD.exe'
 
@@ -25,6 +25,9 @@ function Check([string]$name, [bool]$ok, [string]$detail = "") {
     if (-not $ok) { $script:fail++ }
     Write-Output ("[{0}] {1} {2}" -f ($(if ($ok) { "PASS" } else { "FAIL" })), $name, $detail)
 }
+
+# Start from default settings: another test may have left the UI in Chinese.
+Remove-Item (Join-Path $env:LOCALAPPDATA 'SlimMD\settings.json') -ErrorAction SilentlyContinue
 
 Check "setup exists" (Test-Path $setup) "$([math]::Round((Get-Item $setup).Length/1MB,1)) MB"
 

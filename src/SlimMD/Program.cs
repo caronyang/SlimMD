@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text;
 using SlimMD;
 
@@ -5,6 +6,9 @@ namespace SlimMD;
 
 internal static class Program
 {
+    /// <summary>Time since process start, for SLIMMD_DEBUG diagnostics.</summary>
+    internal static readonly Stopwatch Clock = Stopwatch.StartNew();
+
     [STAThread]
     private static void Main(string[] args)
     {
@@ -12,6 +16,9 @@ internal static class Program
         Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
 
         ApplicationConfiguration.Initialize();
+
+        // Boot the WebView2 browser process while the window is being built.
+        MainForm.PrewarmWebView();
 
         Application.ThreadException += (_, e) =>
         {

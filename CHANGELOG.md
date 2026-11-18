@@ -2,7 +2,30 @@
 
 All notable changes to SlimMD.
 
-## Unreleased
+## 1.0.3 — 2026-11-18
+
+Faster startup and file opening, with a visible loading state.
+
+### Performance
+- The WebView2 browser process is started as soon as SlimMD launches and the
+  preview page begins loading while the window is still being laid out, so the
+  first document appears noticeably sooner.
+- Opening a file no longer waits for the preview engine before reading it, and
+  the preview is rendered immediately instead of after the 250 ms typing
+  debounce. Opening a second document is now effectively instant.
+- The status-bar line/column readout uses native caret lookups instead of
+  scanning the whole document, so it stays smooth on large files.
+
+### Loading indicator
+- While a document is being read and rendered, the status bar shows
+  `Loading <file>...` with an indeterminate progress bar, and the preview pane
+  shows the same message centred instead of a blank white area. Both disappear
+  as soon as the rendered document is on screen.
+- The message follows the interface language (English / Traditional Chinese).
+
+## 1.0.2 — 2026-11-16
+
+Scroll synchronisation fix — both panes now reach the end of the document.
 
 ### Scroll synchronisation
 - Reaching the end of the document now reaches the end of the preview. Block

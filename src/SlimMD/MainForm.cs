@@ -19,11 +19,13 @@ internal sealed class MainForm : Form
     private readonly EditorBox _editor = new();
     private readonly WebView2 _preview = new();
     private readonly Label _previewFallback = new();
+    private readonly Label _previewLoading = new();
     private readonly SplitContainer _split = new();
     private readonly ToolStrip _toolStrip = new();
     private readonly StatusStrip _statusStrip = new();
     private readonly ToolStripStatusLabel _statusLeft = new();
     private readonly ToolStripStatusLabel _statusRight = new();
+    private readonly ToolStripProgressBar _statusProgress = new();
     private readonly System.Windows.Forms.Timer _debounce = new() { Interval = 250 };
 
     private ToolStripButton _btnNew = null!;
@@ -47,6 +49,7 @@ internal sealed class MainForm : Form
     private bool _normalizing;
     private bool _showEditor;
     private bool _previewReady;
+    private Task? _previewInit;
     private bool _renderReset;
     private bool _syncingScroll;
 
@@ -87,6 +90,10 @@ internal sealed class MainForm : Form
         AllowDrop = true;
 
         BuildUi();
+        // Boot WebView2 while the window is still being laid out: the browser
+        // process and the preview page take ~1-2 s, which would otherwise all be
+        // paid after the window appears.
+        _previewInit = InitPreviewAsync();
         RestoreWindowBounds();
         ApplyStrings();
         UpdateTitle();
@@ -102,7 +109,9 @@ internal sealed class MainForm : Form
         FormClosing += OnFormClosing;
         Load += async (_, _) =>
         {
-            await InitPreviewAsync();
+            // Open the document(s) immediately: the preview pane paints as soon
+            // as the WebView2 page is ready (NavigationCompleted -> RenderPreview),
+            // so the file never waits for the browser process to boot.
             var opened = false;
             foreach (var f in _startupFiles)
             {
@@ -112,6 +121,9 @@ internal sealed class MainForm : Form
                     opened = true;
                 }
             }
+
+            await (_previewInit ??= InitPreviewAsync());
+            AppSettings.DebugLog($"+{Program.Clock.ElapsedMilliseconds}ms startup complete");
         };
     }
 
@@ -225,12 +237,25 @@ internal sealed class MainForm : Form
         // Preview pane
         _preview.Dock = DockStyle.Fill;
         _preview.BackColor = Color.White;
+        // Hidden until the first document is rendered: a WebView2 child window
+        // would otherwise paint over any WinForms "loading" label above it.
+        _preview.Visible = false;
 
         _previewFallback.Dock = DockStyle.Fill;
         _previewFallback.TextAlign = ContentAlignment.MiddleCenter;
         _previewFallback.ForeColor = Color.FromArgb(87, 96, 106);
         _previewFallback.Padding = new Padding(32);
         _previewFallback.Visible = false;
+
+        // Sits over the preview while the page/documents are still loading, so the
+        // window never shows a blank white pane without an explanation.
+        _previewLoading.Dock = DockStyle.Fill;
+        _previewLoading.TextAlign = ContentAlignment.MiddleCenter;
+        _previewLoading.Font = new Font(Font.FontFamily, 11.5f);
+        _previewLoading.ForeColor = Color.FromArgb(120, 130, 140);
+        _previewLoading.BackColor = Color.White;
+        _previewLoading.Text = L.T("status.loadingPane");
+        _previewLoading.Visible = true;
 
         _split.Dock = DockStyle.Fill;
         _split.Size = ClientSize;   // real dimensions before min-size validation runs
@@ -245,6 +270,7 @@ internal sealed class MainForm : Form
         _split.Panel1.Controls.Add(_editor);
         _split.Panel2.Controls.Add(_preview);
         _split.Panel2.Controls.Add(_previewFallback);
+        _split.Panel2.Controls.Add(_previewLoading);
         _split.Panel2.Controls.Add(_tabs);
 
         _statusStrip.Dock = DockStyle.Bottom;
@@ -256,7 +282,13 @@ internal sealed class MainForm : Form
         _statusLeft.BorderSides = ToolStripStatusLabelBorderSides.None;
         _statusRight.TextAlign = ContentAlignment.MiddleRight;
         _statusRight.BorderSides = ToolStripStatusLabelBorderSides.None;
+        _statusProgress.Style = ProgressBarStyle.Marquee;
+        _statusProgress.MarqueeAnimationSpeed = 30;
+        _statusProgress.Size = new Size(120, 14);
+        _statusProgress.Visible = false;
+        _statusProgress.Margin = new Padding(6, 3, 6, 3);
         _statusStrip.Items.Add(_statusLeft);
+        _statusStrip.Items.Add(_statusProgress);
         _statusStrip.Items.Add(_statusRight);
 
         Controls.Add(_split);
@@ -317,6 +349,7 @@ internal sealed class MainForm : Form
         _langEn.Checked = L.Current == Lang.En;
         _langZh.Checked = L.Current == Lang.Zh;
         _tabClose.Text = L.T("tab.close");
+        if (_busyDepth == 0) _previewLoading.Text = L.T("status.loadingPane");
         UpdateEditorVisibility(animated: false);
         UpdateTitle();
         UpdateStatus();
@@ -432,9 +465,14 @@ internal sealed class MainForm : Form
             return;
         }
 
+        BeginBusy(L.T("status.loading", Path.GetFileName(full)));
+        _busyUntilRender = true;
         try
         {
+            var readTimer = Stopwatch.StartNew();
             var (text, encoding) = ReadAllTextAuto(full);
+            AppSettings.DebugLog(
+                $"+{Program.Clock.ElapsedMilliseconds}ms read '{full}' ({text.Length} chars) in {readTimer.ElapsedMilliseconds}ms");
             var eol = text.Contains("\r\n") ? "\r\n" : (text.Contains("\n") ? "\n" : "\r\n");
             var editorText = ToEditorEol(text);
             _settings.LastDirectory = Path.GetDirectoryName(full) ?? "";
@@ -460,14 +498,18 @@ internal sealed class MainForm : Form
                 UpdateTitle();
                 UpdateStatus();
                 UpdateTabHeaders();
-                ScheduleRender();
+                // Render immediately: the 250 ms debounce is for typing.
+                RenderPreview();
                 return;
             }
 
             AddTab(full, editorText, encoding, eol, dirty: false);
+            RenderPreview();
         }
         catch (Exception ex)
         {
+            _busyUntilRender = false;
+            EndBusy();
             MsgDialog.Show(this, L.T("msg.error"), L.T("msg.openFailed", ex.Message), MessageBoxIcon.Error, L.T("btn.ok"));
         }
     }
@@ -1236,6 +1278,13 @@ internal sealed class MainForm : Form
 
     private void UpdateStatus()
     {
+        if (_busyDepth > 0)
+        {
+            _statusLeft.Text = _busyText;
+            UpdateCursorStatus();
+            return;
+        }
+
         if (!_showEditor)
         {
             _statusLeft.Text = _filePath == null
@@ -1252,27 +1301,49 @@ internal sealed class MainForm : Form
         UpdateCursorStatus();
     }
 
+    private int _busyDepth;
+    private string _busyText = "";
+    private volatile bool _busyUntilRender;
+
+    /// <summary>Shows the indeterminate progress bar plus a message in the status bar.</summary>
+    private void BeginBusy(string message)
+    {
+        _busyDepth++;
+        _busyText = message;
+        _statusLeft.Text = message;
+        _statusProgress.Visible = true;
+        Cursor = Cursors.WaitCursor;
+        // Explain the blank preview pane until the first document is on screen.
+        if (!_previewReady)
+        {
+            _previewLoading.Text = message;
+            _previewLoading.Visible = true;
+            _previewLoading.BringToFront();
+        }
+    }
+
+    /// <summary>Closes one busy scope; the status bar is restored with the last one.</summary>
+    private void EndBusy()
+    {
+        if (_busyDepth == 0) return;
+        _busyDepth--;
+        if (_busyDepth > 0) return;
+        _statusProgress.Visible = false;
+        Cursor = Cursors.Default;
+        UpdateStatus();
+    }
+
     private void UpdateCursorStatus()
     {
         if (_loading) return;
-        var text = _editor.Text;
-        var pos = Math.Min(_editor.SelectionStart, text.Length);
-        var line = 1;
-        var col = 1;
-        for (var i = 0; i < pos; i++)
-        {
-            if (text[i] == '\n')
-            {
-                line++;
-                col = 1;
-            }
-            else
-            {
-                col++;
-            }
-        }
+        // GetLineFromCharIndex / GetFirstCharIndexFromLine are native lookups;
+        // scanning the whole document here would stutter on large files.
+        var pos = Math.Min(_editor.SelectionStart, _editor.TextLength);
+        var lineIndex = _editor.GetLineFromCharIndex(pos);
+        var lineStart = _editor.GetFirstCharIndexFromLine(lineIndex);
+        var col = pos - Math.Max(0, lineStart);
 
-        _statusRight.Text = L.T("status.cursor", line, col);
+        _statusRight.Text = L.T("status.cursor", lineIndex + 1, col + 1);
     }
 
     // ---------------------------------------------------------------- preview
@@ -1293,18 +1364,41 @@ internal sealed class MainForm : Form
         core.SetVirtualHostNameToFolderMapping(DocHost, _docRoot, CoreWebView2HostResourceAccessKind.Allow);
     }
 
+    private static Task<CoreWebView2Environment>? _envTask;
+
+    /// <summary>
+    /// Starts the WebView2 environment (browser process) as early as possible so
+    /// it boots in parallel with the window being built and the file being read.
+    /// </summary>
+    public static void PrewarmWebView()
+    {
+        try { _ = GetEnvironmentAsync(); }
+        catch (Exception ex) { AppSettings.DebugLog("prewarm failed: " + ex.Message); }
+    }
+
+    private static Task<CoreWebView2Environment> GetEnvironmentAsync()
+    {
+        return _envTask ??= CoreWebView2Environment.CreateAsync(
+            null,
+            Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "SlimMD", "WebView2"));
+    }
+
     private async Task InitPreviewAsync()
     {
         try
         {
-            var userData = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "SlimMD", "WebView2");
-            var env = await CoreWebView2Environment.CreateAsync(null, userData);
+            var env = await GetEnvironmentAsync();
             await _preview.EnsureCoreWebView2Async(env);
+            AppSettings.DebugLog($"+{Program.Clock.ElapsedMilliseconds}ms webview ready");
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            AppSettings.DebugLog("webview init failed: " + ex.Message);
+            _busyUntilRender = false;
+            _previewLoading.Visible = false;
+            EndBusy();
             _preview.Visible = false;
             _previewFallback.Visible = true;
             _previewFallback.Text = L.T("msg.webviewMissing");
@@ -1332,6 +1426,7 @@ internal sealed class MainForm : Form
         // Keep the preview page in place: links open in the system browser / associated app.
         w.NavigationStarting += (_, e) =>
         {
+            AppSettings.DebugLog($"+{Program.Clock.ElapsedMilliseconds}ms navigation starting");
             if (e.Uri.StartsWith($"https://{AppHost}/", StringComparison.OrdinalIgnoreCase))
             {
                 return;
@@ -1349,7 +1444,7 @@ internal sealed class MainForm : Form
         w.NavigationCompleted += async (_, e) =>
         {
             _previewReady = true;
-            AppSettings.DebugLog($"NavigationCompleted success={e.IsSuccess} status={e.WebErrorStatus}");
+            AppSettings.DebugLog($"+{Program.Clock.ElapsedMilliseconds}ms navigation completed success={e.IsSuccess} status={e.WebErrorStatus}");
             if (DebugOn)
             {
                 try
@@ -1453,17 +1548,35 @@ internal sealed class MainForm : Form
         var reset = _renderReset ? "true" : "false";
         var wasReset = _renderReset;
         _renderReset = false;
+        var renderTimer = Stopwatch.StartNew();
         _ = core.ExecuteScriptAsync($"SLIMMD.apply({markdown},{reset});").ContinueWith(_ =>
         {
-            // Content height may have changed: re-anchor the preview to the editor
-            // viewport so the line being edited stays visible.
-            if (!wasReset && IsHandleCreated)
+            AppSettings.DebugLog($"+{Program.Clock.ElapsedMilliseconds}ms rendered in {renderTimer.ElapsedMilliseconds}ms");
+            try
             {
-                _lastPushedLine = -1;
-                _lastPushedAtBottom = false;
-                try { BeginInvoke((Action)SyncScrollToPreview); }
-                catch (InvalidOperationException) { /* handle gone */ }
+                BeginInvoke((Action)(() =>
+                {
+                    // The document is on screen: swap the loading pane for the
+                    // real preview (and clear the status-bar busy state).
+                    _preview.Visible = true;
+                    _previewLoading.Visible = false;
+                    if (_busyUntilRender)
+                    {
+                        _busyUntilRender = false;
+                        EndBusy();
+                    }
+
+                    // Content height may have changed: re-anchor the preview to the
+                    // editor viewport so the line being edited stays visible.
+                    if (!wasReset)
+                    {
+                        _lastPushedLine = -1;
+                        _lastPushedAtBottom = false;
+                        SyncScrollToPreview();
+                    }
+                }));
             }
+            catch (InvalidOperationException) { /* handle gone */ }
         });
     }
 

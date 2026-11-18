@@ -22,6 +22,9 @@
   照樣對齊。
 - **工具列圖示** — 每個工具列動作（新增、開啟、儲存、另存新檔、匯出、編輯、
   語言、關於）標籤前都有小圖示；圖示以 GDI+ 即時繪製，不附帶任何圖檔。
+- **快速開檔與載入提示** — 預覽引擎在視窗建立期間就開始啟動、檔案一選好就
+  立即讀取，開檔明顯更快。文件準備期間，下方狀態列會顯示「正在讀取
+  <檔名>…」與進度條，預覽區也同步顯示載入訊息。
 - **開啟 / 新建 / 儲存 / 另存新檔** — `Ctrl+O`、`Ctrl+N`、`Ctrl+S`、
   `Ctrl+Shift+S`，瀏覽與編輯模式皆可使用。也可將 `.md` 檔拖放至視窗開啟，
   或在命令列傳入檔案：`SlimMD.exe notes.md todo.md`。
@@ -59,7 +62,7 @@
 
 ## 安裝
 
-執行 `dist\SlimMD-1.0.2-Setup.exe` — 僅安裝給目前使用者（不需要系統管理員
+執行 `dist\SlimMD-1.0.3-Setup.exe` — 僅安裝給目前使用者（不需要系統管理員
 權限），預設安裝至 `%LOCALAPPDATA%\Programs\SlimMD`。
 
 安裝程式提供選用項目：桌面捷徑、`.md` 檔關聯。
@@ -69,7 +72,7 @@
 ### 靜默安裝
 
 ```
-SlimMD-1.0.2-Setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+SlimMD-1.0.3-Setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
 ```
 
 ## 從原始碼建置
@@ -95,7 +98,8 @@ powershell -ExecutionPolicy Bypass -File build.ps1
 | `powershell -File tools\export-test.ps1` | 匯出流程（選單 → 儲存對話框 → PDF/HTML 落盤）— 17 項檢查 |
 | `powershell -File tools\tabs-test.ps1` | 多檔案頁籤 + 未存檔關閉提醒 + 頁籤 ✕ 關閉鈕 — 15 項檢查 |
 | `powershell -File tools\scroll-test.ps1` | 編輯區 ↔ 預覽區捲動同步（雙向）— 4 項檢查 |
-| `powershell -File tools\blocksync-test.ps1` | 區塊式捲動同步：編輯區頂行 ↔ 預覽區頂部區塊對齊 — 6 項檢查 |
+| `powershell -File tools\blocksync-test.ps1` | 區塊式捲動同步：編輯區頂行 ↔ 預覽區頂部區塊對齊 — 7 項檢查 |
+| `powershell -File tools\loading-test.ps1` | 載入狀態（狀態列 + 預覽區，中英各一輪）— 9 項檢查 |
 | `powershell -File tools\installer-test.ps1` | 正式安裝檔：靜默安裝 → 執行 → 匯出選單 → 解除安裝 — 6 項檢查 |
 
 ## 專案結構

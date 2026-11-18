@@ -52,6 +52,8 @@ internal static class L
         ["status.cursor"] = ("Ln {0}, Col {1}", "第 {0} 行，第 {1} 列"),
         ["status.doc"] = ("{0}  |  {1}  |  {2} chars", "{0}  |  {1}  |  {2} 個字元"),
         ["status.exported"] = ("Exported: {0}", "已匯出：{0}"),
+        ["status.loading"] = ("Loading {0}...", "正在讀取 {0}…"),
+        ["status.loadingPane"] = ("Loading...", "載入中…"),
 
         // Files
         ["file.untitled"] = ("Untitled", "未命名"),
